@@ -477,9 +477,9 @@ end
 
 %% optional: spline fit to extract z-drift
 
-drift_spline = fit(filtdata(idx,8),filtdata(idx,3),'smoothingspline','SmoothingParam',1e-3);
+drift_spline = fit(filtdata(idx,8),filtdata(idx,3),'smoothingspline','SmoothingParam',1e-2);
 figure(100);
-plot(drift_spline,filtdata(idx,8),filtdata(idx,3),'.'); xlabel('loc no.'); ylabel('z /nm');
+plot(drift_spline,filtdata(idx,8),filtdata(idx,3),'.'); xlabel('frame no.'); ylabel('z /nm');
 tmp = ppval(drift_spline.p,filtdata(idx,8)); %z-correction curve
 z_drift=interp1(filtdata(idx,8),tmp,filtdata(:,8),'linear','extrap');
 z_drift=z_drift-mean(z_drift(:));
@@ -492,7 +492,7 @@ z_drift=z_drift-mean(z_drift(:));
 
 t0=datetime('14:34:37');  %recording start time of tif-stack (add 3 hours! -> Andor software is 3hrs behind!) 
 dt=0.06249; % 'Kinetic cycle time', (in seconds) take from tif-stack info                             
-driftmag=20; %drift factor in nm per drift signal unit; 
+driftmag=10; %drift factor in nm per drift signal unit; 
 
 
 rectime=filtdata(:,8)*dt; %relative recording time of every location in seconds
@@ -527,8 +527,22 @@ plot(r_coord*1e6,z_theory*1e9-[0 sqrt(CRBz)],'r.');
 scatter(r_mol*1e6,filtdata(:,3)-z_drift,3,markercolor); grid on; colorbar; 
 xlabel('radial coord / µm');
 ylabel('z /  nm');
-title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual-thresh=' num2str(qual_thresh)]);
+title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual-th.=' num2str(qual_thresh) ', drift corr']);
 grid on;
 ylim([0 250]);
 colormap jet; 
 hold off;
+
+%----3D scatterplot: show all filtered data----
+figure(44); 
+%plot3(locdata_TS(:,1)/1e3,locdata_TS(:,2)/1e3,locdata_TS(:,3),'o'); grid on;
+markersize=3; %(locdata_TS(:,4)+1)/1e3;
+markercolor=filtdata(:,7); 
+scatter3(filtdata(:,1)/1e3,filtdata(:,2)/1e3,filtdata(:,3)-z_drift,markersize,markercolor); grid on;
+colormap jet; 
+colorbar; 
+title('local. data, thunderstorm - drift corrected');
+zlabel('z / nm');
+xlabel('x / µm');
+ylabel('y / µm');
+zlim([0 250]);
