@@ -3,6 +3,7 @@
 %program calculates BFP-fields for various distances (z) of the dipole from the coverslip
 %from these data the CRB for x-y-z expectation values are calculated
 
+
 clear all;
 %close all;
 
@@ -19,13 +20,14 @@ bg=140; %mean background-counts level
 N=128;
 lambda_0=680e-9;
 
-dz_vec=(-0.7:.005:0.2)*1e-6; %vector of defocus values - to simulate 3D PSFs
+%dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
+dz_vec=0e-9; %only a single defocus 
 
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
 %dz=-300e-9;  %defocus of objective lens (negative values mean moving the focus into the fluid)
 
-NA=1.7; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+NA=1.67; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 %NA=1.49; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 
 d2=0e-9; %thickness of intermediate layer (layer 2)
@@ -36,7 +38,7 @@ ux=115e-9; %resolution in focal space
 Nx=21; %desired simulated field size in pixel
 
  
-load('coeff_2018-10-10_vectashield_err0,17.mat'); %for aberrations
+%load('coeff_2018-10-10_vectashield_err0,17.mat'); %for aberrations
 %-----------------------
 
 [SA_out,Defocus,~] =fun_SA_RImismatch(N,RI(3),RI(3),NA,lambda_0,1); %Defocus function refers to refractive index n2
@@ -63,15 +65,19 @@ uk=4*pi/lambda_0*NA/N; %unit in pupil space (k-space)
 pupil_UAF=circshift(R<=((N/2)*(RI(1)/NA))*1,[0 0]); %pupil containing UAF light
 
 %-----considering aberrations-----
-aberr=0; Z_aberr2=0;
-%aberr=sum(ZernikeCalc([4 11 22],[2.1603    1.1705    1.1048]',pupil,'NOLL'),3);
-Z_aberr2(1:2)=0; %delete tip, tilt to center the PSF
-bar(Z_aberr2); 
-%aberr=sum(ZernikeCalc([2:37,56],Z_aberr2',pupil,'NOLL'),3); %aberration file "coef.mat" must be loaded 
+if exist('Z_aberr2') %if aberration Zernikes are loaded
+    Z_aberr2(1:2)=0; %delete tip, tilt to center the PSF
+    bar(Z_aberr2); 
+    aberr=sum(ZernikeCalc([2:37,56],Z_aberr2',pupil,'NOLL'),3); %aberration file "coef.mat" must be loaded 
+else
+    aberr=0; 
+    %aberr=sum(ZernikeCalc([4 11 22],[2.1603    1.1705    1.1048]',pupil,'NOLL'),3);
+    disp('assuming NO aberrations');
+end
 
-uz=3e-9;
-z_vec=50e-9;
-%z_vec=(0e-9:uz:250e-9); %simulated dipole distances above layer 2
+uz=2e-9;
+%z_vec=50e-9;
+z_vec=(0e-9:uz:250e-9); %simulated dipole distances above layer 2
 %z-dipole
 
 %calculating BFP-fields for all dipole orientations
@@ -288,23 +294,25 @@ xlabel('z / nm');
 %     imwrite((PSF_tot(:,:,m)/max(PSF_tot(:))),['PSF_tot_'  ' uz=' num2str(uz) '_focus=' num2str(dz) '.tif'],'WriteMode','append');
 %     %imwrite((PSF_UAF(:,:,m)/max(PSF_tot(:))),['PSF_UAF_'  ' uz=' num2str(uz) '_focus=' num2str(dz) '.tif'],'WriteMode','append');
 %     end
+if length(dz_vec)>1 
+    PSF_defocus(:,:,mm)=PSF_tot; %if mm-loop is activated; %here you can choose between PSF_tot or PSF_UAF
+end
 
-PSF_defocus(:,:,mm)=PSF_tot; %if mm-loop is activated
 end  %end of mm-index loop 
-    %save('PSF_0-3-250nm_RI=1,45_dz=-500nm_aberrfree.mat','PSF_tot','PSF_UAF','z_vec','ux','NA','RI');
+    %save('PSF_0-2-250nm_RI=1,45_defoc=0nm_aberr-top_2018-11-28.mat','PSF_tot','PSF_UAF','z_vec','ux','NA','RI');
 
-%% optional: preparing 5D-PSF-model for use with "MLE_fit_molecules_exp"
+%% optional: preparing 5D-PSF-model for use with "MLE_fit_molecules_exp" or "MLE_fit_molecules_2channels_exp"
 % PSF-model is expanded to 5D (interpolated along x-y directions)
 % this avoids the use of interpolation in the log-likelihood function ->
 % faster
 
-if length(dz_vec)>1
+if length(dz_vec)>1 %if multiple defocus-values are defined
     Nz=length(dz_vec);
     PSF_tmp=PSF_defocus;
     disp('creating 5D "defocus" PSF');
-elseif length(z_vec)>1
+elseif length(z_vec)>1   %if multiple z-distances are defined (and only one defocus-value!)
     Nz=length(z_vec);
-    PSF_tmp=PSF_tot;
+    PSF_tmp=PSF_tot;%here you can choose between PSF_tot or PSF_UAF
     disp('creating 5D SAF-PSF');
 end
 
@@ -324,8 +332,11 @@ for mz=1:Nz
 end
 disp('done');
 PSF5D(isnan(PSF5D))=0;
-%save('PSF5D_0-3-250nm_RI=1,45_dz=-300_aberrfree.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
+
+
+%save('PSF5D_0-2-250nm_RI=1,45_dz=0_aberr_top_2018-11-28.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
 %save('PSF5D_defocus_dz=-700 to -200nm_RI=1,45_aberrfree.mat','PSF5D','z_vec','dz_vec','ux','NA','RI','interp_incr'); 
+%save('PSF5D_UAF(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
   
     
 %% ---calculating CRBs----
@@ -334,14 +345,15 @@ PSF5D(isnan(PSF5D))=0;
 %between individual PSFs, which are also not available in experiment. 
 
 %optional: investigating a combination of two molecule images (two-channel imaging)
-    %load('PSF_dz=0nm.mat'); PSF_A=PSF_tot; PSF_B=PSF_UAF;
-    %load('PSF_dz=-300nm.mat'); PSF_B=PSF_tot;
+    %load('PSF_0-3-250nm_RI=1,45_defoc=-500nm_aberrfree.mat'); PSF_A=PSF_UAF; PSF_B=PSF_UAF;
+    %load('PSF_0-3-250nm_RI=1,45_defoc=0nm_aberrfree.mat'); PSF_B=PSF_tot;
     %PSF_tot=[PSF_A PSF_B];
     %PSF_tot=PSF_B; %single channel 
-
-[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot./repmat(sum(sum(PSF_tot,1),2),[size(PSF_tot,1) size(PSF_tot,2) 1]),ux,uz,n_photon,bg/2);
+    %PSF_tot=PSF_defocus; %if a "defocus"-stack has been calculated
+    
+[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot./repmat(sum(sum(PSF_tot,1),2),[size(PSF_tot,1) size(PSF_tot,2) 1]),ux,uz,n_photon/2,bg/2);
 figure(4);
-plot((1:length(CRBz))*uz*1e9,sqrt(CRBz)*1.41,'b.-'); xlabel('z-pos in nm'); ylabel('nm');
+plot((1:length(CRBz))*uz*1e9,sqrt(CRBz),'b.-'); xlabel('z-pos in nm'); ylabel('nm');
 title(['sqrt(CRBz), cts=' num2str(n_photon)]); grid on;
 ylim([0 70]);
 

@@ -16,7 +16,9 @@ clc;
 %load('PSF_SAF_NA1,49_0-2nm-200nm_dz=-430nm.mat') %defocused PSF-model; should give better z-estimates
 
 %vectashield-PSFs:
-load('PSF_SAF_NA1,7_0-2nm-200nm_RI=1,45_dz=-400nm.mat') %defocused PSF-model; should give better z-estimates
+load('PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat') %defocused PSF-model; should give better z-estimates
+load('PSF_0-3-250nm_RI=1,45_defoc=0nm_aberrfree.mat') %defocused PSF-model; should give better z-estimates
+
 %load('PSF_SAF_0-2nm-200nm_RI=1,45_dz=-750nm_2018-09-26.mat') %defocused PSF-model; should give better z-estimates
 
 %use second image channel?
@@ -39,7 +41,7 @@ PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1]);
 dz_PSF=diff(PSF_norm,1,3); %calculating derivative along z (required for ML estimation)
 PSF_norm(:,:,end)=[]; %delete last slice to match size of dz_PSF
 
-if strcmp(ch,'y');
+if strcmp(ch,'y')
     energies2=(trapz(trapz(PSF2,1),2)); 
     PSF2_norm=PSF2./repmat(energies2,[size(PSF2,1),size(PSF2,2),1]);
     dz_PSF2=diff(PSF2_norm,1,3); %calculating derivative along z (required for ML estimation)
@@ -65,7 +67,7 @@ x_data(:,:,2)=Y; %coord. data in this form is required for Gaussfits which are u
 %% taking out an arbitraty x-y slice of the PSF-stack: this is our "measurement"
 
 photon_no=1000; %total photon number
-BG=100; %background level in photons
+BG=200; %background level in photons
 
 
 %calculating CRLBs for single-channel imaging (all photons in one channel)

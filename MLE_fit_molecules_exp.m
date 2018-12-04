@@ -5,11 +5,11 @@ clear all;
 %% user parameters 
 
 %camera parameters
-gain=50;  %set gain to 1 if gain is switched off
+gain=100;  %set gain to 1 if gain is switched off
 amp=9.9; %9.9; %electrons per count 
 QE=0.95; %quantum efficiency
 
-r_sphere=1.0e-3/2; %radius of sphere
+r_sphere=2.0e-3/2; %radius of sphere
 
 qual_thresh=15; %quality thrshold for MLE-fits (bad fits are discarded from the data)
 %the smaller the value the stricter is the selection.
@@ -20,12 +20,11 @@ qual_thresh=15; %quality thrshold for MLE-fits (bad fits are discarded from the 
 %load('PSF_0-3-250nm_RI=1,45_dz=-500nm_aberrfree.mat'); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
 
 %5D PSFs: (faster)
-load('PSF5D_0-3-250nm_RI=1,45_dz=-400_aberrfree.mat'); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+load('PSF5D_0-2-250nm_RI=1,45_dz=-350_aberr_top_2018-11-28.mat'); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 
 %"defocus" Stack (with varying defocus but constant SAF/UAF relations, i.e.
 %no change of molecule distance from the coverslip)
 %load('PSF5D_defocus_dz=-700 to -200nm_RI=1,45_aberrfree.mat'); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-
 
 
 if length(z_vec)>1
@@ -71,7 +70,7 @@ BGmask=zeros(nx,ny);
 BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
-use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
+use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data
 [Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
@@ -120,7 +119,7 @@ imagesc(data_corr(:,:,5));
 
 %% METHOD A : click & evaluate (only use for 3D-PSFs! Ohterwise, you must click with 1 pixel precision!)
 
-img_no=6;
+img_no=3;
 
 figure(1);
 imagesc(data_corr(:,:,img_no)); colormap gray; axis equal; axis tight; 
@@ -186,7 +185,7 @@ disp(est);
 % (works for 3D and 5D PSF models)
 
 %use thunderstorm to find molecules. copy and paste resulting localization
-%table into Matlab under the varname "TS"
+%table into Matlab under the varname "TS" (import as "MATRIX")
 %TS=[id, frame, x, y, sigma, intensity, offset ...]
 
 %saving or loading Thunderstorm (TS) localization data: 
@@ -199,17 +198,18 @@ I=fun_thunderstorm_crop(TS,data_corr,data_BG,(nx-1)/2,ux);
 px=TS(:,3)/(ux*1e9); %approx. position of molecules 
 py=TS(:,4)/(ux*1e9);
 
-clear x_est y_est z_est N_est BG_est;
+clear x_est y_est z_est N_est BG_est resnorm_MLE loc_no frame_no;
 
 m=0;
 clear locdata_TS resnorm_MLE loc_no x_est y_est z_est N_est BG_est;
 
-for mm=1:size(I,3)
+idx_disc=[];
+for mm=1:size(TS_full,1)
     
     est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini,qual_thresh);
     
     if isempty(est) %if resnorm is too large, function returns est=[]
-    
+        idx_disc=[idx_disc mm]; %indidces of images to be discarded
     else
         m=m+1;
         x_est(m)=(py(mm)+est(1))*ux*1e9;
@@ -223,14 +223,20 @@ for mm=1:size(I,3)
         disp(m);
     end
 end
+I(:,:,idx_disc)=[];
 disp('done');
 
 locdata_TS=[x_est' y_est' z_est' N_est' BG_est' resnorm_MLE' loc_no' frame_no'];
-%save(['LOCDATA_' Name '_defocus-model=-700nm to -200nm,aberrfree.mat'],'locdata_TS','PSF','ux','NA','gain','amp','QE','z','r_sphere');
 z_drift=0;
 
+%% saving localization results
+
+save(['LOCDATA_' Name '_EVER_aberr.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
+
 %% -- data eval, method B (thunderstorm)
+
 finaldata=locdata_TS; 
+I_sel=I; %selected images
 
 %finaldata=finaldata0; 
 
@@ -239,15 +245,15 @@ finaldata=locdata_TS;
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=15e-6; %cutoff distance from sphere center in m
+    r_cutoff=25e-6; %cutoff distance from sphere center in m
 %manually defining sphere center
-    xc=[18.1 20.5]*1e3;
+    xc=[15 16]*1e3;
     findcenter='n'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
     no_c=0; %central local. no.
     no_delta=inf;  %half width, set inf to get all data
 %selecting a defined azimuthal section of the sphere 
-    phi_c=0; %central angle of cake-slice (in deg.)
+    phi_c=200; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
     qual_thresh=3;  %the lower the cutoff, the more strict the selection
@@ -259,22 +265,27 @@ finaldata=locdata_TS;
 %delete molecules with zero signal photons
 idx=finaldata(:,4)==0;
 finaldata(idx,:)=[];
+I_sel(:,:,idx)=[]; 
 
 %delete entries that run into upper z-boundaries
 idx=finaldata(:,3)>=max(z)*1e9-1;
 finaldata(idx,:)=[]; 
+I_sel(:,:,idx)=[]; 
 
 %delete entries that run into lower z-boundaries
 idx=finaldata(:,3)<=min(z)*1e9+1;
 finaldata(idx,:)=[]; 
+I_sel(:,:,idx)=[]; 
 
 %selecting temporal sections
 idx=abs(finaldata(:,7)-no_c)>no_delta;
 finaldata(idx,:)=[];
+I_sel(:,:,idx)=[]; 
 
 %delete entries which are too far away from the sphere center
 idx=((finaldata(:,1)-xc(1)).^2+(finaldata(:,2)-xc(2)).^2)>(r_cutoff*1e9)^2;
 finaldata(idx,:)=[];
+I_sel(:,:,idx)=[]; 
 
 %selecting a defined azimuthal section of the sphere 
 y_tmp=finaldata(:,2)-xc(2); 
@@ -282,16 +293,19 @@ x_tmp=finaldata(:,1)-xc(1);
 phi=atan2(y_tmp,x_tmp)/pi*180; %in deg
 idx=abs(mod(phi-phi_c+180,360)-180)>dphi;
 finaldata(idx,:)=[];
+I_sel(:,:,idx)=[]; 
 
 %delting entries with too high fit-errors (residuals)
 idx=finaldata(:,6)>qual_thresh*min(finaldata(:,6));
 finaldata(idx,:)=[];
+I_sel(:,:,idx)=[]; 
 
 %filtering data: photon threshold
 idx=(photon_hiBND<finaldata(:,4));
 finaldata(idx,:)=[];
 idx=(finaldata(:,4)<photon_loBND);
 finaldata(idx,:)=[];
+I_sel(:,:,idx)=[]; 
 
 filtdata=finaldata;
 
@@ -312,7 +326,6 @@ end
 delta_z=z_error(xc); %standard deviation in nm 
 
 r_mol=sqrt((filtdata(:,1)-(xc(1))).^2+(filtdata(:,2)-(xc(2))).^2)*1e-9; %radial molecule coords. in meter
-
 
 
 %----3D scatterplot: show all filtered data----
@@ -393,13 +406,15 @@ else
 end
     
 [CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg);
+disp('------------------');
+disp('Cramer-Rao bounds:');
 disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
 disp(['min. sqrt(CRLB-y): ' num2str(min(sqrt(CRBy(:))),3)]);
 disp(['min. sqrt(CRLB-z): ' num2str(min(sqrt(CRBz(:))),3)]);
 
 % -----plotting radial distance versus estimated z-positions-----
 figure(3);
-markercolor=(filtdata(:,7)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit
+markercolor=(filtdata(:,4)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
 %markercolor=zeros(length(filtdata),1);
 plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
 hold on; 
@@ -432,7 +447,7 @@ title(['polynomial fit; std=' num2str(delta_z2,2) ' nm; qual-thresh=' num2str(qu
 
 %% --- click into 2D scatterplot and calculate precisions of closely neighboured localizations
 
-figure(7);
+figure(6);
 [px, py] = getpts(gcf);
 boxrad=500; %in nm; side length of squared selection "box" around selected point
 
@@ -477,7 +492,7 @@ end
 
 %% optional: spline fit to extract z-drift
 
-drift_spline = fit(filtdata(idx,8),filtdata(idx,3),'smoothingspline','SmoothingParam',1e-2);
+drift_spline = fit(filtdata(idx,8),filtdata(idx,3),'smoothingspline','SmoothingParam',1e-3);
 figure(100);
 plot(drift_spline,filtdata(idx,8),filtdata(idx,3),'.'); xlabel('frame no.'); ylabel('z /nm');
 tmp = ppval(drift_spline.p,filtdata(idx,8)); %z-correction curve
@@ -490,9 +505,9 @@ z_drift=z_drift-mean(z_drift(:));
 %drag & drop into workspace, import as "table" datatype
 %call variable "d"
 
-t0=datetime('14:34:37');  %recording start time of tif-stack (add 3 hours! -> Andor software is 3hrs behind!) 
-dt=0.06249; % 'Kinetic cycle time', (in seconds) take from tif-stack info                             
-driftmag=10; %drift factor in nm per drift signal unit; 
+t0=datetime('16:01:20');  %recording start time of tif-stack (add 2(winter) or 3 hours! -> Andor software is 3hrs behind!) 
+dt=0.05969; % 'Kinetic cycle time', (in seconds) take from tif-stack info                             
+driftmag=+20; %drift factor in nm per drift signal unit; 
 
 
 rectime=filtdata(:,8)*dt; %relative recording time of every location in seconds
@@ -515,8 +530,12 @@ grid on;
 xlabel('frame no.');
 ylabel('drift / nm');
 
-%% -----plotting drift-corrected z-data----- compare with fig3 
+%% calculate z-precision after drift correction:
+z_dev_driftcorr=filtdata(:,3)-z_drift-(r_sphere-sqrt(r_sphere.^2-r_mol.^2))*1e9; %deviation of est. z-pos. from the sphere surface
+delta_z3=std(z_dev_driftcorr);
 
+
+%-----plotting drift-corrected z-data----- compare with fig3 
 figure(33);
 markercolor=(filtdata(:,7)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit
 %markercolor=zeros(length(filtdata),1);
@@ -527,7 +546,7 @@ plot(r_coord*1e6,z_theory*1e9-[0 sqrt(CRBz)],'r.');
 scatter(r_mol*1e6,filtdata(:,3)-z_drift,3,markercolor); grid on; colorbar; 
 xlabel('radial coord / µm');
 ylabel('z /  nm');
-title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual-th.=' num2str(qual_thresh) ', drift corr']);
+title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z3,2) 'nm, qual-th.=' num2str(qual_thresh) ', drift corr']);
 grid on;
 ylim([0 250]);
 colormap jet; 
@@ -546,3 +565,4 @@ zlabel('z / nm');
 xlabel('x / µm');
 ylabel('y / µm');
 zlim([0 250]);
+
