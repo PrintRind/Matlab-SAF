@@ -21,7 +21,7 @@ N=128;
 lambda_0=680e-9;
 
 %dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
-dz_vec=0e-9; %only a single defocus 
+dz_vec=-400e-9; %only a single defocus 
 
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
@@ -334,7 +334,7 @@ disp('done');
 PSF5D(isnan(PSF5D))=0;
 
 
-%save('PSF5D_0-2-250nm_RI=1,45_dz=0_aberr_top_2018-11-28.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
+%save('PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
 %save('PSF5D_defocus_dz=-700 to -200nm_RI=1,45_aberrfree.mat','PSF5D','z_vec','dz_vec','ux','NA','RI','interp_incr'); 
 %save('PSF5D_UAF(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
   

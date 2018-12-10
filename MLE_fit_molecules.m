@@ -16,8 +16,10 @@ clc;
 %load('PSF_SAF_NA1,49_0-2nm-200nm_dz=-430nm.mat') %defocused PSF-model; should give better z-estimates
 
 %vectashield-PSFs:
-load('PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat') %defocused PSF-model; should give better z-estimates
-load('PSF_0-3-250nm_RI=1,45_defoc=0nm_aberrfree.mat') %defocused PSF-model; should give better z-estimates
+PSFpath='C:\Users\q004aj\Desktop\PSFs\';
+
+load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']) %defocused PSF-model; should give better z-estimates
+%load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=0nm_aberrfree.mat']) %defocused PSF-model; should give better z-estimates
 
 %load('PSF_SAF_0-2nm-200nm_RI=1,45_dz=-750nm_2018-09-26.mat') %defocused PSF-model; should give better z-estimates
 
@@ -37,13 +39,13 @@ uz=z_vec(2)-z_vec(1); %z-increment in PSF-stack
 
 %PSF: normalization of energy in each z-slice
 energies=(trapz(trapz(PSF,1),2)); 
-PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1]);
+PSF_norm=PSF;%./repmat(energies,[size(PSF,1),size(PSF,2),1]);
 dz_PSF=diff(PSF_norm,1,3); %calculating derivative along z (required for ML estimation)
 PSF_norm(:,:,end)=[]; %delete last slice to match size of dz_PSF
 
 if strcmp(ch,'y')
     energies2=(trapz(trapz(PSF2,1),2)); 
-    PSF2_norm=PSF2./repmat(energies2,[size(PSF2,1),size(PSF2,2),1]);
+    PSF2_norm=PSF2;%./repmat(energies2,[size(PSF2,1),size(PSF2,2),1]);
     dz_PSF2=diff(PSF2_norm,1,3); %calculating derivative along z (required for ML estimation)
     PSF2_norm(:,:,end)=[]; %delete last slice to match size of dz_PSF
     ratio_gt=squeeze((energies-energies2)./energies2); %"ground-truth" ratio-curve
@@ -66,13 +68,11 @@ x_data(:,:,2)=Y; %coord. data in this form is required for Gaussfits which are u
 
 %% taking out an arbitraty x-y slice of the PSF-stack: this is our "measurement"
 
-photon_no=1000; %total photon number
-BG=200; %background level in photons
-
+photon_no=500000; %total photon number
+BG=0; %background level in photons
 
 %calculating CRLBs for single-channel imaging (all photons in one channel)
 [CRBx,CRBy,CRBz]=fun_CRB(PSF./repmat(sum(sum(PSF,1),2),[size(PSF,1) size(PSF,2) 1]),ux,uz,photon_no,BG);
-
 
 fun_estimate=@(v) v(5)+v(4)*interpn(PSF_norm,(fw+1:nx+fw)-v(1),(fw+1:ny+fw)'-v(2),v(3)); %calculates molecule image from estimated parameters x
 fun_estimate2=@(v) v(5)+v(4)*interpn(PSF2_norm,(fw+1:nx+fw)-v(1),(fw+1:ny+fw)'-v(2),v(3)); %calculates molecule image from estimated parameters x
@@ -93,7 +93,7 @@ for mm=1:length(z_truth) %stepping through all z-slices and simulating several m
     I_nf=interpn(PSF_norm,(fw+1:nx+fw)-dx(mm),(fw+1:ny+fw)'-dy(mm),z_truth(mm)); %imagesc(I); %nf...noise-free
     
     %generate second ground-truth image (UAF):
-    if strcmp(ch,'y'); 
+    if strcmp(ch,'y')
         I2_nf=interpn(PSF2_norm,(fw+1:nx+fw)-dx(mm),(fw+1:ny+fw)'-dy(mm),z_truth(mm)); %imagesc(I); %nf...noise-free
         frac_tot=0.5; %half of the energy goes into the tot-image
         frac_UAF=0.5*squeeze(energies2(z_truth)./energies(z_truth)); %a bit less goes into the UAF-channel due to the SAF-block
@@ -104,7 +104,7 @@ for mm=1:length(z_truth) %stepping through all z-slices and simulating several m
     
     for m=1:10 %repetitive measurements loop
                 
-        if strcmp(ch,'y'); %for 2-image-channels
+        if strcmp(ch,'y') %for 2-image-channels
             I=poissrnd(I_nf/sum(I_nf(:))*photon_no*frac_tot+BG*frac_tot); %adding noise
             I2=poissrnd(I2_nf/sum(I2_nf(:))*photon_no*frac_UAF(mm)+BG*frac_UAF(mm)); %adding noise
         else

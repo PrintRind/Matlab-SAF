@@ -16,11 +16,13 @@ qual_thresh=15; %quality thrshold for MLE-fits (bad fits are discarded from the 
 
 %% loading PSF model
 
+PSFpath='C:\Users\q004aj\Desktop\PSFs\';
+
 %3D PSFs:
-%load('PSF_0-3-250nm_RI=1,45_dz=-500nm_aberrfree.mat'); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
+%load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
 
 %5D PSFs: (faster)
-load('PSF5D_0-2-250nm_RI=1,45_dz=-350_aberr_top_2018-11-28.mat'); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 
 %"defocus" Stack (with varying defocus but constant SAF/UAF relations, i.e.
 %no change of molecule distance from the coverslip)
@@ -40,21 +42,21 @@ if ndims(PSF)==3 %if "standard" 3D PSF is loaded (no interpolation in MLE necess
     [nx0,ny0,nz0]=size(PSF); %size of model    clear PSF_tot;
     %PSF: normalization of energy in each z-slice
     energies=(trapz(trapz(PSF,1),2)); 
-    PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1]);
+    PSF_norm=PSF;%./repmat(energies,[size(PSF,1),size(PSF,2),1]);
     interp_incr=1; 
 elseif ndims(PSF)==5 
     [nx0,ny0,nz0,nxi,nyi]=size(PSF); %size of model
     clear PSF5D;
     %PSF: normalization of energy in each z-slice
     energies=(trapz(trapz(PSF(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)),1),2)); 
-    PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1,nxi,nyi]);
+    PSF_norm=PSF;%./repmat(energies,[size(PSF,1),size(PSF,2),1,nxi,nyi]);
 end
 disp('done');
 
 %dz_PSF=diff(PSF_norm,1,3); %calculating derivative along z (required for ML estimation)
 %PSF_norm(:,:,end)=[]; %delete last slice to match size of dz_PSF
 
-fw=3; %frame-width (width of border around the PSF-images, needed to allow for x-y-localization (shifts))
+fw=1; %frame-width (width of border around the PSF-images, needed to allow for x-y-localization (shifts))
        
 %create coordinate system 
 x=(fw+1:nx0-fw)-ceil((nx0+1)/2);
@@ -70,7 +72,7 @@ BGmask=zeros(nx,ny);
 BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
-use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
+use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data
 [Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
@@ -119,7 +121,7 @@ imagesc(data_corr(:,:,5));
 
 %% METHOD A : click & evaluate (only use for 3D-PSFs! Ohterwise, you must click with 1 pixel precision!)
 
-img_no=3;
+img_no=4;
 
 figure(1);
 imagesc(data_corr(:,:,img_no)); colormap gray; axis equal; axis tight; 
@@ -180,7 +182,6 @@ end
 
 disp(est);
 
-
 %% METHOD B: using thunderstorm coordinates
 % (works for 3D and 5D PSF models)
 
@@ -231,7 +232,7 @@ z_drift=0;
 
 %% saving localization results
 
-save(['LOCDATA_' Name '_EVER_aberr.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
+save(['LOCDATA_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
 
 %% -- data eval, method B (thunderstorm)
 
@@ -245,9 +246,9 @@ I_sel=I; %selected images
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=25e-6; %cutoff distance from sphere center in m
+    r_cutoff=22e-6; %cutoff distance from sphere center in m
 %manually defining sphere center
-    xc=[15 16]*1e3;
+    xc=[1 1]*size(data,1)/2*ux*1e9;
     findcenter='n'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
     no_c=0; %central local. no.
@@ -256,7 +257,7 @@ I_sel=I; %selected images
     phi_c=200; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=3;  %the lower the cutoff, the more strict the selection
+    qual_thresh=2;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=0;
     photon_hiBND=inf;
@@ -352,7 +353,6 @@ zlabel('z / nm');
 xlabel('x / µm');
 ylabel('y / µm');
 
-
 figure(4);
 subplot(2,1,1); 
 hist(filtdata(:,4),20);
@@ -397,7 +397,7 @@ else
     PSF3D=PSF; 
 end
     
-if gain==1
+if gain==1 || strcmp(Name(1:4),'simu')  %if the raw-data stems from a simulation, gain>1 has no influence on noise!
     mean_signal=mean(filtdata(:,4));
     mean_bg=mean(filtdata(:,5));
 else
@@ -412,10 +412,11 @@ disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
 disp(['min. sqrt(CRLB-y): ' num2str(min(sqrt(CRBy(:))),3)]);
 disp(['min. sqrt(CRLB-z): ' num2str(min(sqrt(CRBz(:))),3)]);
 
-% -----plotting radial distance versus estimated z-positions-----
+% ----MAIN PLOT: plotting radial distance versus estimated z-positions-----
+
 figure(3);
-markercolor=(filtdata(:,4)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
-%markercolor=zeros(length(filtdata),1);
+markercolor=(filtdata(:,7)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
+%markercolor=[0 0 0];
 plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
 hold on; 
 plot(r_coord*1e6,z_theory*1e9+[0 sqrt(CRBz)],'r.');
@@ -423,11 +424,25 @@ plot(r_coord*1e6,z_theory*1e9-[0 sqrt(CRBz)],'r.');
 scatter(r_mol*1e6,filtdata(:,3),3,markercolor); grid on; colorbar; 
 xlabel('radial coord / µm');
 ylabel('z /  nm');
-title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual-thresh=' num2str(qual_thresh)]);
+title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual=' num2str(qual_thresh) ', sig/bg=' num2str(mean(filtdata(:,4)),4) '/' num2str(mean(filtdata(:,5)),3)]);
 grid on;
 ylim([0 250]);
 colormap jet; 
 hold off;
+
+%% show details to the CURSOR-selected molecule image
+
+h=figure(3);
+dcm_obj = datacursormode(h);
+c_info = getCursorInfo(dcm_obj); 
+
+XData=c_info.Target.XData;
+YData=c_info.Target.XData;
+selected_loc_no=find([XData' YData']==[c_info.Position]); %c_info.Position(1))
+
+figure(33)
+imagesc(I_sel(:,:,selected_loc_no)); axis equal; axis tight; 
+title(['z=' num2str(filtdata(selected_loc_no,3),4)]);
 
 %% -----polynomial fit through data to provide better precision estimate-----
 % %fitcoefs=polyfit(r_mol*1e6,filtdata(:,3),2);
