@@ -8,7 +8,7 @@ clear all;
 gain=100;  %set gain to 1 if gain is switched off
 amp=9.9; %9.9; %electrons per count 
 QE=0.95; %quantum efficiency
-
+ux=115e-9; %effective camera pixel size
 r_sphere=2.0e-3/2; %radius of sphere
 
 qual_thresh=15; %quality thrshold for MLE-fits (bad fits are discarded from the data)
@@ -22,7 +22,10 @@ PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 %load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
 
 %5D PSFs: (faster)
-load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+%load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+load([PSFpath 'PSF5D_0-2-250nm_RI=1,35_dz=-350_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+
+ux=ux*os; 
 
 %"defocus" Stack (with varying defocus but constant SAF/UAF relations, i.e.
 %no change of molecule distance from the coverslip)
@@ -42,14 +45,14 @@ if ndims(PSF)==3 %if "standard" 3D PSF is loaded (no interpolation in MLE necess
     [nx0,ny0,nz0]=size(PSF); %size of model    clear PSF_tot;
     %PSF: normalization of energy in each z-slice
     energies=(trapz(trapz(PSF,1),2)); 
-    PSF_norm=PSF;%./repmat(energies,[size(PSF,1),size(PSF,2),1]);
+    PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1]);
     interp_incr=1; 
 elseif ndims(PSF)==5 
     [nx0,ny0,nz0,nxi,nyi]=size(PSF); %size of model
     clear PSF5D;
     %PSF: normalization of energy in each z-slice
     energies=(trapz(trapz(PSF(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)),1),2)); 
-    PSF_norm=PSF;%./repmat(energies,[size(PSF,1),size(PSF,2),1,nxi,nyi]);
+    PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1,nxi,nyi]);
 end
 disp('done');
 
@@ -72,7 +75,7 @@ BGmask=zeros(nx,ny);
 BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
-use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
+use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data
 [Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
@@ -193,7 +196,7 @@ disp(est);
 %save('TS_2018-10-10_0nm.mat','TS');
 %load TS_2018-09-26_-400nm.mat
 TS_full=TS;
-%TS(300:end,:)=[];
+%TS(5000:end,:)=[];
 
 I=fun_thunderstorm_crop(TS,data_corr,data_BG,(nx-1)/2,ux);
 px=TS(:,3)/(ux*1e9); %approx. position of molecules 
@@ -246,7 +249,7 @@ I_sel=I; %selected images
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=22e-6; %cutoff distance from sphere center in m
+    r_cutoff=25e-6; %cutoff distance from sphere center in m
 %manually defining sphere center
     xc=[1 1]*size(data,1)/2*ux*1e9;
     findcenter='n'; %automatic center-finding? set to 'y' or 'n'
@@ -257,7 +260,7 @@ I_sel=I; %selected images
     phi_c=200; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=2;  %the lower the cutoff, the more strict the selection
+    qual_thresh=50;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=0;
     photon_hiBND=inf;
@@ -380,7 +383,7 @@ title('loc. data, z-values color-coded');
 
 %---2D-scatterplot; signal-photon-no. color-coded---
 figure(7);
-markercolor=filtdata(:,4); 
+markercolor=filtdata(:,3); 
 %markercolor=uint8(markercolor/max(markercolor(:))*255*2);
 scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,2,markercolor);
 xlabel('x / µm');
@@ -415,7 +418,7 @@ disp(['min. sqrt(CRLB-z): ' num2str(min(sqrt(CRBz(:))),3)]);
 % ----MAIN PLOT: plotting radial distance versus estimated z-positions-----
 
 figure(3);
-markercolor=(filtdata(:,7)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
+markercolor=(filtdata(:,4)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
 %markercolor=[0 0 0];
 plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
 hold on; 
@@ -432,13 +435,13 @@ hold off;
 
 %% show details to the CURSOR-selected molecule image
 
-h=figure(3);
+h=figure(1);
 dcm_obj = datacursormode(h);
 c_info = getCursorInfo(dcm_obj); 
 
 XData=c_info.Target.XData;
 YData=c_info.Target.XData;
-selected_loc_no=find([XData' YData']==[c_info.Position]); %c_info.Position(1))
+selected_loc_no=find([XData' YData']==[c_info.Position(1:2)]); %c_info.Position(1))
 
 figure(33)
 imagesc(I_sel(:,:,selected_loc_no)); axis equal; axis tight; 

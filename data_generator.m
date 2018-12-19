@@ -10,13 +10,12 @@ close all;
 no_images=200; %number of simulated CCD images (=length of stack)
 n_img=400;  %pixel size length of each simulated camera image
 rho=0.001; %average molecule density 1/µm^2
-ux=115e-9;  %pixel size in m
-sig=3000; %signal per molecule in photons (refers to signal of brightest molecule)
-BG_top=500; %background level in photons in top image
+sig=500e3; %signal per molecule in photons (refers to signal of brightest molecule)
+BG_top=0; %background level in photons in top image
 BG_bottom=500; %background level in photons in bottom image
 
 %camera parameters
-gain=100; 
+gain=1; 
 amp=9.9; %electrons per count 
 QE=0.95; %quantum efficiency
 
@@ -27,23 +26,27 @@ r_sphere=2.0e-3/2; %radius of calibration sphere (Alexa-coated ball lens)
 theta=5;  %rotation angle in deg
 ratio=0.93; %ratio=energy_topimage/engergy_bottomimage: power ratio between the two imaging channels(representing nonideal beamsplitter)
 
-%PSF-path
-path='C:\Users\q004aj\Desktop\PSFs\';
 
 %% loading "top-image" model (upper image on camera)
 
+%PSF-path
+PSFpath='C:\Users\q004aj\Desktop\PSFs\';
+
 %load('./PSFs/PSF5D_tot(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat'); %loading 3D or 5D PSF-model
-load([path 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree.mat']); %loading 3D or 5D PSF-model
+
+%load 3D PSF:
+load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
 
 two_ch='n'; %flag, indicating that two channels are simulated
 
-if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
+%if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
     PSF_top=PSF_tot; 
     [nx0,ny0,nz0]=size(PSF_top); %size of model    
-elseif ndims(PSF5D)==5 
-    [nx0,ny0,nz0,nxi,nyi]=size(PSF5D);
-    PSF_top=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
-end
+    disp('3D-PSF loaded');
+%elseif ndims(PSF5D)==5 
+%    [nx0,ny0,nz0,nxi,nyi]=size(PSF5D);
+%    PSF_top=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
+%end
 
 E_top=trapz(trapz(PSF_top,1),2);
 clear PSF5D;
@@ -56,13 +59,13 @@ disp('done');
 
 two_ch='y'; %flag, indicating that two channels are simulated
 
-load([path 'PSF5D_UAF(bottom)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat']); %loading 3D or 5D PSF-model
+load([PSFpath 'PSF5D_UAF(bottom)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat']); %loading 3D or 5D PSF-model
 
-if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
+%if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
     PSF_bottom=PSF_tot;
-elseif ndims(PSF5D)==5 
-    PSF_bottom=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
-end
+%elseif ndims(PSF5D)==5 
+%    PSF_bottom=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
+%end
 E_bottom=trapz(trapz(PSF_bottom,1),2);
 
 clear PSF5D;
@@ -71,26 +74,26 @@ disp('done');
 %% creating coordinate systems
 
 %creating real space coordinate system
-x=linspace(0,(n_img-1)*ux,n_img);
+x=linspace(0,(n_img*os-1)*ux,n_img*os);
 xc=x(end/2); 
 yc=xc; %center coords.
 [X,Y]=meshgrid(x,x); %coordinate system on camera
 
 %creating k-space coordinate system
-uk=2*pi/ux/n_img;
+uk=2*pi/ux/n_img/os;
 Kx=X/ux*uk;
 Ky=Y/ux*uk;
 
 %% calculating molecule positions and creating image stacks
 clear CCD_top CCD_bottom
 
-no_mols=round(rho*(n_img*ux*1e6)^2); %total number of molecules in a single CCD image
+no_mols=round(rho*(n_img*os*ux*1e6)^2); %total number of molecules in a single CCD image
 
 for mm=1:no_images
     disp(no_images-mm)
     
-    x_mol=rand(1,no_mols)*(n_img-1)*ux; 
-    y_mol=rand(1,no_mols)*(n_img-1)*ux; 
+    x_mol=rand(1,no_mols)*(n_img*os-1)*ux; 
+    y_mol=rand(1,no_mols)*(n_img*os-1)*ux; 
     z_mol=min(r_sphere-sqrt(r_sphere.^2-(x_mol-xc).^2-(y_mol-yc).^2),250e-9);
 
 %     figure(1);
@@ -123,13 +126,13 @@ for mm=1:no_images
     disp('done');
 
     
-    CCD_ideal_top=zeros(n_img,n_img);
+    CCD_ideal_top=zeros(n_img*os,n_img*os);
     if strcmp(two_ch,'y')
-        CCD_ideal_bottom=zeros(n_img,n_img);
+        CCD_ideal_bottom=zeros(n_img*os,n_img*os);
     end
     
     for m=1:no_mols %moving molecules laterally
-        tmp=embed(I_top(:,:,m),[n_img,n_img],0); %embedding molecules image in empty CCD image
+        tmp=embed(I_top(:,:,m),os*[n_img,n_img],0); %embedding molecules image in empty CCD image
         
         %A)Fourier-based shifting
         %F_tmp=fftshift(fft2((tmp))); 
@@ -154,10 +157,10 @@ for mm=1:no_images
     end
 
     % adding background and noise
-    CCD_top(:,:,mm)=uint16(poissrnd((CCD_ideal_top+BG_top)*ratio)*gain/amp*QE);
+    CCD_top(:,:,mm)=uint16(poissrnd(os^2*imresize(CCD_ideal_top,1/os,'box')+BG_top)*gain/amp*QE);
     
     if strcmp(two_ch,'y')
-        CCD_bottom(:,:,mm)=uint16(poissrnd(CCD_ideal_bottom+BG_bottom)*gain/amp*QE);
+        CCD_bottom(:,:,mm)=uint16(poissrnd((os^2*imresize(CCD_ideal_bottom,1/os,'box')+BG_bottom)/ratio)*gain/amp*QE);
     end
     
     
@@ -185,7 +188,8 @@ end
 
 filename=['sig-bg=' num2str(sig,4) '-' num2str(BG_top,3) '_gain=' num2str(gain)  '_rho=' num2str(rho)];
 for mm=1:no_images
-    imwrite(CCD_top(:,:,mm),['simu_top_(tot)_' filename '.tif'],'WriteMode','Append');
+    
+    imwrite(CCD_top(:,:,mm),['simu_os3_top_(tot)_' filename '.tif'],'WriteMode','Append');
     
     if strcmp(two_ch,'y')
         imwrite(CCD_bottom(:,:,mm),['simu_bottom_(UAF)_' filename '.tif'],'WriteMode','Append');

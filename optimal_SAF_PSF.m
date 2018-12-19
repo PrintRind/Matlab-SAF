@@ -12,13 +12,21 @@ global Z ux uk uz Ex_Px Ex_Py Ex_Pz Ey_Px Ey_Py Ey_Pz Nx n_photon bg mask
 %% calculating BFP fields for SAF
 
 %---user parameters----
+os=3; %oversampling
+ux=115e-9/os; %resolution in focal space
+Nx=19*os; %desired simulated field size in pixel
 
 noise='n';  %set to 'y' or 'n'
 n_photon=4700; %number of camera counts in the brightest dipole-image
 bg=140; %mean background-counts level
 
 N=128;
-lambda_0=680e-9;
+lambda_0=670e-9;
+NA=1.67; RI=[1.35 1.35 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+%NA=1.49; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+d2=0e-9; %thickness of intermediate layer (layer 2)
+f=1.8e-3; %focal length of objective
+mu=1e-16; %magnitude of dipole (arbitrary value)
 
 %dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
 dz_vec=-400e-9; %only a single defocus 
@@ -26,17 +34,6 @@ dz_vec=-400e-9; %only a single defocus
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
 %dz=-300e-9;  %defocus of objective lens (negative values mean moving the focus into the fluid)
-
-NA=1.67; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
-%NA=1.49; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
-
-d2=0e-9; %thickness of intermediate layer (layer 2)
-f=1.8e-3; %focal length of objective
-mu=1e-16; %magnitude of dipole (arbitrary value)
-
-ux=115e-9; %resolution in focal space
-Nx=21; %desired simulated field size in pixel
-
  
 %load('coeff_2018-10-10_vectashield_err0,17.mat'); %for aberrations
 %-----------------------
@@ -299,7 +296,9 @@ if length(dz_vec)>1
 end
 
 end  %end of mm-index loop 
-    %save('PSF_0-2-250nm_RI=1,45_defoc=0nm_aberr-top_2018-11-28.mat','PSF_tot','PSF_UAF','z_vec','ux','NA','RI');
+
+PSFpath='c:/users/q004aj/desktop/PSFs/';
+%save([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat'],'PSF_tot','PSF_UAF','z_vec','ux','NA','RI','os');
 
 %% optional: preparing 5D-PSF-model for use with "MLE_fit_molecules_exp" or "MLE_fit_molecules_2channels_exp"
 % PSF-model is expanded to 5D (interpolated along x-y directions)
@@ -317,15 +316,15 @@ elseif length(z_vec)>1   %if multiple z-distances are defined (and only one defo
 end
 
 Ns=51; %interpolation-steps in x-y
-sx=linspace(-1,1,Ns);
+sx=linspace(-1*os,1*os,Ns);
 sy=sx; 
 interp_incr=sx(2)-sx(1); %interpolation increment in units of pixels
 
-PSF5D=zeros(Nx,Nx,Nz,Ns,Ns);
+PSF5D=zeros(round(Nx/os),round(Nx/os),Nz,Ns,Ns);
 for mz=1:Nz
     for mx=1:Ns
         for my=1:Ns 
-            PSF5D(:,:,mz,mx,my)=interp2(PSF_tmp(:,:,mz),(1:Nx)-sx(mx),(1:Nx)'-sy(my));
+            PSF5D(:,:,mz,mx,my)=os^2*imresize(interp2(PSF_tmp(:,:,mz),(1:Nx)-sx(mx),(1:Nx)'-sy(my)),1/os,'box');
         end
     end
     disp(Nz-mz);
@@ -333,11 +332,9 @@ end
 disp('done');
 PSF5D(isnan(PSF5D))=0;
 
+PSFpath='c:/users/q004aj/desktop/PSFs/';
+%save([PSFpath 'PSF5D_0-2-250nm_RI=1,35_dz=-400_aberrfree_os3.mat'],'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
 
-%save('PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
-%save('PSF5D_defocus_dz=-700 to -200nm_RI=1,45_aberrfree.mat','PSF5D','z_vec','dz_vec','ux','NA','RI','interp_incr'); 
-%save('PSF5D_UAF(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat','PSF5D','z_vec','ux','NA','RI','interp_incr'); 
-  
     
 %% ---calculating CRBs----
 %for calculation of CRBs, the PSFs are individually normalized to contain the same
