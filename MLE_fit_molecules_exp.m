@@ -1,11 +1,11 @@
 %evaluate experimental molecule Data --> 3D localisations
-%test
+
 clear all; 
 
 %% user parameters 
 
 %camera parameters
-gain=100;  %set gain to 1 if gain is switched off
+gain=1;  %set gain to 1 if gain is switched off
 amp=9.9; %9.9; %electrons per count 
 QE=0.95; %quantum efficiency
 ux=115e-9; %effective camera pixel size
@@ -22,8 +22,8 @@ PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 %load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
 
 %5D PSFs: (faster)
-%load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-load([PSFpath 'PSF5D_0-2-250nm_RI=1,35_dz=-350_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+%load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 
 ux=ux*os; 
 
@@ -75,13 +75,15 @@ BGmask=zeros(nx,ny);
 BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
-use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
+use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data
 [Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
     image_no=length(imfinfo([Path Name]));
+    progressbar;
     for m=1:image_no
-      data(:,:,m)=double(imread([Path Name],m));
+       data(:,:,m)=double(imread([Path Name],m));
+       progressbar(m/image_no);
     end
     
 % EVER - background reduction
@@ -154,8 +156,8 @@ for m=1:no_mols
     est=fun_MLE(I,PSF_norm,interp_incr,x_data,z_ini,qual_thresh); %estimate molecule position 
     
     if isempty(est)==0
-        x_est(m)=(py(m)+est(1))*ux*1e9;
-        y_est(m)=(px(m)+est(2))*ux*1e9; %px measures along the column-direction
+        x_est(m)=(round(py(m))+est(1))*ux*1e9;
+        y_est(m)=(round(px(m))+est(2))*ux*1e9; %px measures along the column-direction
         z_est(m)=interp1(1:length(z),z,est(3))*1e9; %estimated z-position in nm
         N_est(m)=est(4)/gain*amp/QE;
         BG_est(m)=est(5)/gain*amp/QE;
@@ -188,6 +190,9 @@ disp(est);
 %% METHOD B: using thunderstorm coordinates
 % (works for 3D and 5D PSF models)
 
+TS = csvread('TS_os3.csv',1,0);
+%TS_table=readtable('TS_os3.csv');
+
 %use thunderstorm to find molecules. copy and paste resulting localization
 %table into Matlab under the varname "TS" (import as "MATRIX")
 %TS=[id, frame, x, y, sigma, intensity, offset ...]
@@ -196,11 +201,11 @@ disp(est);
 %save('TS_2018-10-10_0nm.mat','TS');
 %load TS_2018-09-26_-400nm.mat
 TS_full=TS;
-%TS(5000:end,:)=[];
+%TS(10000:end,:)=[];
 
-I=fun_thunderstorm_crop(TS,data_corr,data_BG,(nx-1)/2,ux);
-px=TS(:,3)/(ux*1e9); %approx. position of molecules 
-py=TS(:,4)/(ux*1e9);
+[I,relpos]=fun_thunderstorm_crop(TS,data_corr,data_BG,(nx-1)/2,ux);
+px=TS(:,3);%/(ux*1e9); %approx. position of molecules in nm
+py=TS(:,4);%/(ux*1e9);
 
 clear x_est y_est z_est N_est BG_est resnorm_MLE loc_no frame_no;
 
@@ -208,30 +213,53 @@ m=0;
 clear locdata_TS resnorm_MLE loc_no x_est y_est z_est N_est BG_est;
 
 idx_disc=[];
-for mm=1:size(TS_full,1)
+%progressbar; %initialize progressbar
+loc_no_tot=length(TS_full);
+
+tic
+for mm=1:loc_no_tot
     
-    est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini,qual_thresh);
+    if mm<10
+        showimage=1;
+    else
+        showimage=0;
+    end
+        
+    est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini,qual_thresh,showimage);
+    %est=fun_MLE_fast(I(:,:,mm),PSF_norm,interp_incr,z_ini,qual_thresh,[relpos(mm,:) TS(mm,6:7)/amp],showimage)
     
     if isempty(est) %if resnorm is too large, function returns est=[]
         idx_disc=[idx_disc mm]; %indidces of images to be discarded
     else
         m=m+1;
-        x_est(m)=(py(mm)+est(1))*ux*1e9;
-        y_est(m)=(px(mm)+est(2))*ux*1e9; %px measures along the column-direction
+        x_est(m)=py(mm);%*ux*1e9;%(round(py(mm))+est(1))*ux*1e9; %note the round-operation! this is required because of the way the images are cropped in "fun_thunderstorm_crop"
+        y_est(m)=px(mm);%*ux*1e9;%(round(px(mm))+est(2))*ux*1e9; %px measures along the column-direction
         z_est(m)=interp1(1:length(z),z,est(3))*1e9; %estimated z-position in nm
         N_est(m)=est(4)/gain*amp/QE;
         BG_est(m)=est(5)/gain*amp/QE;
         resnorm_MLE(m)=est(6);
         loc_no(m)=TS(mm,1); %number of localization (temporal order)
         frame_no(m)=TS(mm,2); %number of image frame
-        disp(m);
+        %progressbar(mm/loc_no_tot);
+        
+        %test of x-y-localization
+%         figure(1); 
+%         imagesc(I(:,:,mm)); colormap gray; 
+%         hold on; 
+%         plot(est(2)+round(nx/2),est(1)+round(nx/2),'rx');
+%         hold off; 
+%         pause;
+    
     end
 end
+toc
+
 I(:,:,idx_disc)=[];
 disp('done');
 
 locdata_TS=[x_est' y_est' z_est' N_est' BG_est' resnorm_MLE' loc_no' frame_no'];
 z_drift=0;
+
 
 %% saving localization results
 
@@ -242,14 +270,20 @@ save(['LOCDATA_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sp
 finaldata=locdata_TS; 
 I_sel=I; %selected images
 
-%finaldata=finaldata0; 
+%DRIFT CORRECTION - interpolating frame-dependent drift values from the Thunderstorm-curves
+% drift_x=interp1(drift(2:end,1),drift(2:end,2),finaldata(:,8));
+% drift_y=interp1(drift(2:end,3),drift(2:end,4),finaldata(:,8));
+% plot(drift_x); hold on; plot(drift_y); xlabel('frame no.'); ylabel('drift/pix'); hold off; 
+% finaldata(:,1)=finaldata(:,1)-0*drift_y*ux*1e9;
+% finaldata(:,2)=finaldata(:,2)-0*drift_x*ux*1e9;
 
+%finaldata=finaldata0; 
 % -----data eval----- finding optimal sphere center and plotting z-estimates against distance from sphere center
 
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=25e-6; %cutoff distance from sphere center in m
+    r_cutoff=35e-6; %cutoff distance from sphere center in m
 %manually defining sphere center
     xc=[1 1]*size(data,1)/2*ux*1e9;
     findcenter='n'; %automatic center-finding? set to 'y' or 'n'
@@ -260,7 +294,7 @@ I_sel=I; %selected images
     phi_c=200; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=50;  %the lower the cutoff, the more strict the selection
+    qual_thresh=25;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=0;
     photon_hiBND=inf;
@@ -272,7 +306,7 @@ finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
 %delete entries that run into upper z-boundaries
-idx=finaldata(:,3)>=max(z)*1e9-1;
+idx=finaldata(:,3)>=max(z)*1e9;
 finaldata(idx,:)=[]; 
 I_sel(:,:,idx)=[]; 
 
@@ -335,8 +369,8 @@ r_mol=sqrt((filtdata(:,1)-(xc(1))).^2+(filtdata(:,2)-(xc(2))).^2)*1e-9; %radial 
 %----3D scatterplot: show all filtered data----
 figure(1); 
 %plot3(locdata_TS(:,1)/1e3,locdata_TS(:,2)/1e3,locdata_TS(:,3),'o'); grid on;
-markersize=3; %(locdata_TS(:,4)+1)/1e3;
-markercolor=filtdata(:,7); 
+markersize=1; %(locdata_TS(:,4)+1)/1e3;
+markercolor=filtdata(:,3); 
 scatter3(filtdata(:,1)/1e3,filtdata(:,2)/1e3,filtdata(:,3),markersize,markercolor); grid on;
 colormap jet; 
 colorbar; 
@@ -345,16 +379,16 @@ zlabel('z / nm');
 xlabel('x / µm');
 ylabel('y / µm');
 
-figure(2);
-z_dev=filtdata(:,3)-(r_sphere-sqrt(r_sphere.^2-r_mol.^2))*1e9; %deviation of est. z-pos. from the sphere surface
-markercolor=z_dev;
-scatter3(filtdata(:,1)/1e3,filtdata(:,2)/1e3,z_dev,markersize,markercolor); grid on;
-colormap jet; 
-colorbar; 
-title('deviation from sphere surface');
-zlabel('z / nm');
-xlabel('x / µm');
-ylabel('y / µm');
+% figure(2);
+% z_dev=filtdata(:,3)-(r_sphere-sqrt(r_sphere.^2-r_mol.^2))*1e9; %deviation of est. z-pos. from the sphere surface
+% markercolor=z_dev;
+% scatter3(filtdata(:,1)/1e3,filtdata(:,2)/1e3,z_dev,markersize,markercolor); grid on;
+% colormap jet; 
+% colorbar; 
+% title('deviation from sphere surface');
+% zlabel('z / nm');
+% xlabel('x / µm');
+% ylabel('y / µm');
 
 figure(4);
 subplot(2,1,1); 
@@ -370,20 +404,22 @@ title(['background, mean=' num2str(mean(filtdata(:,5)),2)]);
 xlabel('photons');
 ylabel('number of localizations');
 
-%----2D scatterplot with color-coded z-value----
+% ----2D scatterplot with color-coded z-value----
 figure(6); 
+markersize=2;
 markercolor=filtdata(:,3);% markercolor=uint8(markercolor);
-scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,2,markercolor);
+scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,markersize,markercolor);
 xlabel('x / µm');
 ylabel('y / µm');
 axis equal; axis tight; 
 colormap jet; 
 colorbar; 
 title('loc. data, z-values color-coded');
+%
 
 %---2D-scatterplot; signal-photon-no. color-coded---
 figure(7);
-markercolor=filtdata(:,3); 
+markercolor=filtdata(:,4); 
 %markercolor=uint8(markercolor/max(markercolor(:))*255*2);
 scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,2,markercolor);
 xlabel('x / µm');
