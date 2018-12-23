@@ -22,14 +22,14 @@ bg=140; %mean background-counts level
 
 N=128;
 lambda_0=670e-9;
-NA=1.67; RI=[1.35 1.35 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+NA=1.67; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 %NA=1.49; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 d2=0e-9; %thickness of intermediate layer (layer 2)
 f=1.8e-3; %focal length of objective
 mu=1e-16; %magnitude of dipole (arbitrary value)
 
 %dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
-dz_vec=-400e-9; %only a single defocus 
+dz_vec=-500e-9; %only a single defocus 
 
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
@@ -318,7 +318,7 @@ end
 Ns=51; %interpolation-steps in x-y
 sx=linspace(-1*os,1*os,Ns);
 sy=sx; 
-interp_incr=sx(2)-sx(1); %interpolation increment in units of pixels
+interp_incr=(sx(2)-sx(1))/os; %interpolation increment in units of pixels
 
 PSF5D=zeros(round(Nx/os),round(Nx/os),Nz,Ns,Ns);
 for mz=1:Nz
@@ -333,7 +333,7 @@ disp('done');
 PSF5D(isnan(PSF5D))=0;
 
 PSFpath='c:/users/q004aj/desktop/PSFs/';
-%save([PSFpath 'PSF5D_0-2-250nm_RI=1,35_dz=-400_aberrfree_os3.mat'],'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
+%save([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-500_aberrfree_os3.mat'],'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
 
     
 %% ---calculating CRBs----
