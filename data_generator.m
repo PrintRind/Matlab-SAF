@@ -7,12 +7,12 @@ clear all;
 close all; 
 
 %%
-no_images=200; %number of simulated CCD images (=length of stack)
+no_images=50; %number of simulated CCD images (=length of stack)
 n_img=400;  %pixel size length of each simulated camera image
 rho=0.001; %average molecule density 1/µm^2
 sig=500e3; %signal per molecule in photons (refers to signal of brightest molecule)
 BG_top=0; %background level in photons in top image
-BG_bottom=500; %background level in photons in bottom image
+BG_bottom=0; %background level in photons in bottom image
 
 %camera parameters
 gain=1; 
