@@ -14,11 +14,11 @@ global Z ux uk uz Ex_Px Ex_Py Ex_Pz Ey_Px Ey_Py Ey_Pz Nx n_photon bg mask
 %---user parameters----
 os=3; %oversampling
 ux=115e-9/os; %resolution in focal space
-Nx=19*os; %desired simulated field size in pixel
+Nx=15*os; %desired simulated field size in pixel
 
 noise='n';  %set to 'y' or 'n'
-n_photon=4700; %number of camera counts in the brightest dipole-image
-bg=140; %mean background-counts level
+n_photon=2000; %number of camera counts in the brightest dipole-image
+bg=100; %mean background-counts level
 
 N=128;
 lambda_0=670e-9;
@@ -29,7 +29,7 @@ f=1.8e-3; %focal length of objective
 mu=1e-16; %magnitude of dipole (arbitrary value)
 
 %dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
-dz_vec=-500e-9; %only a single defocus 
+dz_vec=-450e-9; %only a single defocus 
 
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
@@ -155,7 +155,7 @@ for m=1:length(z_vec)
     if m==1; C_norm=sum(sum(PSF_tot(:,:,1))); end %normalization to total intensity in first image (m=1)
     %C_norm=sum(sum(PSF_tot(:,:,m)));  %normalization if info is contained in shape-changes
     
-    if strcmp(noise,'y'); %if noise is selected
+    if strcmp(noise,'y') %if noise is selected
         tmp=PSF_tot(:,:,m)/C_norm*n_photon+bg; 
         PSF_tot(:,:,m)=poissrnd(tmp,size(tmp,1),size(tmp,2)); %normalization of PSF   
     else
@@ -298,7 +298,8 @@ end
 end  %end of mm-index loop 
 
 PSFpath='c:/users/q004aj/desktop/PSFs/';
-%save([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat'],'PSF_tot','PSF_UAF','z_vec','ux','NA','RI','os');
+%save([PSFpath 'PSF_' num2str(Nx/os) 'x' num2str(Nx/os) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree_os3.mat'],'PSF_tot','PSF_UAF','z_vec','ux','NA','RI','os');
+
 
 %% optional: preparing 5D-PSF-model for use with "MLE_fit_molecules_exp" or "MLE_fit_molecules_2channels_exp"
 % PSF-model is expanded to 5D (interpolated along x-y directions)
@@ -316,15 +317,17 @@ elseif length(z_vec)>1   %if multiple z-distances are defined (and only one defo
 end
 
 Ns=51; %interpolation-steps in x-y
-sx=linspace(-1*os,1*os,Ns);
+w=1; %(half) range of molecule x-y-offsets (in camera pixels) that should be covered with the interpolation
+sx=linspace(-w*os,w*os,Ns);
 sy=sx; 
 interp_incr=(sx(2)-sx(1))/os; %interpolation increment in units of pixels
 
-PSF5D=zeros(round(Nx/os),round(Nx/os),Nz,Ns,Ns);
+PSF5D=zeros(round(Nx/os)-2*w,round(Nx/os)-2*w,Nz,Ns,Ns);
 for mz=1:Nz
     for mx=1:Ns
         for my=1:Ns 
-            PSF5D(:,:,mz,mx,my)=os^2*imresize(interp2(PSF_tmp(:,:,mz),(1:Nx)-sx(mx),(1:Nx)'-sy(my)),1/os,'box');
+            tmp=os^2*imresize(interp2(PSF_tmp(:,:,mz),(1:Nx)-sx(mx),(1:Nx)'-sy(my)),1/os,'box');
+            PSF5D(:,:,mz,mx,my)=tmp(1+w:end-w,1+w:end-w); %cut the outer pixel frame because of potential sampling artifacts
         end
     end
     disp(Nz-mz);
@@ -333,7 +336,7 @@ disp('done');
 PSF5D(isnan(PSF5D))=0;
 
 PSFpath='c:/users/q004aj/desktop/PSFs/';
-%save([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-500_aberrfree_os3.mat'],'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
+%save([PSFpath 'PSF5D_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree_os3.mat'],'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
 
     
 %% ---calculating CRBs----
@@ -348,20 +351,20 @@ PSFpath='c:/users/q004aj/desktop/PSFs/';
     %PSF_tot=PSF_B; %single channel 
     %PSF_tot=PSF_defocus; %if a "defocus"-stack has been calculated
     
-[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot./repmat(sum(sum(PSF_tot,1),2),[size(PSF_tot,1) size(PSF_tot,2) 1]),ux,uz,n_photon/2,bg/2);
+[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot./repmat(sum(sum(PSF_tot,1),2),[size(PSF_tot,1) size(PSF_tot,2) 1]),ux,uz,n_photon,bg/os^2); %note that if PSF is oversampled the background needs to be adapted correspondingly
 figure(4);
 plot((1:length(CRBz))*uz*1e9,sqrt(CRBz),'b.-'); xlabel('z-pos in nm'); ylabel('nm');
-title(['sqrt(CRBz), cts=' num2str(n_photon)]); grid on;
-ylim([0 70]);
+title(['sqrt(CRBz), cts=' num2str(n_photon) ', bg=' num2str(bg)]); grid on;
+%ylim([0 70]);
 
 figure(5);
 plot((1:length(CRBz))*uz*1e9,sqrt(CRBx)); xlabel('z-pos in nm'); ylabel('nm');
 hold on; 
 plot((1:length(CRBz))*uz*1e9,sqrt(CRBy),'r.-'); xlabel('z-pos in nm'); ylabel('nm');
-title(['sqrt(CRBx), sqrt(CRBy) (red), cts='  num2str(n_photon)]);
+title(['sqrt(CRBx), sqrt(CRBy) (red), cts='  num2str(n_photon) ', bg=' num2str(bg)]);
 hold off;
 grid on;
-ylim([0 15]);
+%ylim([0 15]);
 
 metric1=mean(sqrt((CRBx.*CRBy.*CRBz)).^(1/3))  %"localization volume"
 metric2=mean(sqrt(CRBz)); 

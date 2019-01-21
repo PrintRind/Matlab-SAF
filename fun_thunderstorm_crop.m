@@ -11,7 +11,7 @@ frame=TS(:,2); %frame number
 x_pos=TS(:,3)/(ux*1e9); %x-position, convert into units of pixels
 y_pos=TS(:,4)/(ux*1e9);
 
-for m=1:img_no;
+for m=1:img_no
     rows=round((y_pos(m)-w):(y_pos(m)+w));
     cols=round((x_pos(m)-w):(x_pos(m)+w));
     if (min(rows)>0) && (max(rows)<size(data_stack,1)) && (min(cols)>0) && (max(cols)<size(data_stack,2))

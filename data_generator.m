@@ -7,16 +7,16 @@ clear all;
 close all; 
 
 %%
-no_images=50; %number of simulated CCD images (=length of stack)
+no_images=100; %number of simulated CCD images (=length of stack)
 n_img=400;  %pixel size length of each simulated camera image
-rho=0.001; %average molecule density 1/µm^2
-sig=500e3; %signal per molecule in photons (refers to signal of brightest molecule)
-BG_top=0; %background level in photons in top image
+rho=0.002; %average molecule density 1/µm^2
+sig=5e5; %signal per molecule in photons (refers to signal of brightest molecule)
+BG_top=1; %background level in photons in top image
 BG_bottom=0; %background level in photons in bottom image
 
 %camera parameters
 gain=1; 
-amp=9.9; %electrons per count 
+amp=9.9 ; %set to 9.9 for andor; electrons per count 
 QE=0.95; %quantum efficiency
 
 r_sphere=2.0e-3/2; %radius of calibration sphere (Alexa-coated ball lens)
@@ -35,7 +35,8 @@ PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 %load('./PSFs/PSF5D_tot(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat'); %loading 3D or 5D PSF-model
 
 %load 3D PSF:
-load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
+%load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
+load([PSFpath 'PSF_21x21_0-2-250nm_RI=1.45_dz=-400_aberrfree_os3.mat']);
 
 two_ch='n'; %flag, indicating that two channels are simulated
 
@@ -59,7 +60,7 @@ disp('done');
 
 two_ch='y'; %flag, indicating that two channels are simulated
 
-load([PSFpath 'PSF5D_UAF(bottom)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat']); %loading 3D or 5D PSF-model
+load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-500nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
 
 %if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
     PSF_bottom=PSF_tot;
