@@ -198,7 +198,7 @@ if size(TS_multi,2)<10 %adding extra columns if TS-matrix has too few
 end
         
 %data pre-filtering options
-thresh_dist=1200; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
+thresh_dist=00; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
 thresh_sigma=1*max(TS_multi(:,5)); %sigma of Gaussian fit in nm
 thresh_uncert=1*max(TS_multi(:,10)); %
 TS = RmNN(TS_multi(end,2),TS_multi,thresh_dist,thresh_sigma,thresh_uncert); %picking only those molecule images with no neighbours in the vicinity
@@ -277,7 +277,7 @@ z_drift=0;
 
 %% saving localization results
 
-save(['LOCDATA_13x13PSF_dz-400nm_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
+save(['LOCDATA_fulldata_13x13PSF_dz-400nm_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
 
 %% -- data eval, method B (thunderstorm)
 
@@ -300,17 +300,17 @@ I_sel=I; %selected images
 %----------deleting erroneous entries / filtering data -----------
     r_cutoff=18e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
 %manually defining sphere center
-    xc=[4 4]*1e3; %[x,y]
+    xc=[6 7.17]*1e3; %[x,y]
     %xc=[1 1]*size(data,1)/2*ux*1e9;
     findcenter='y'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
-    no_c=10000*36; %central local. no.
-    no_delta=inf;  %half width, set inf to get all data
+    no_c=200000; %central local. no.
+    no_delta=50000;  %half width, set inf to get all data
 %selecting a defined azimuthal section of the sphere 
     phi_c=0; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=5;  %the lower the cutoff, the more strict the selection
+    qual_thresh=10;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=0;
     photon_hiBND=inf;
@@ -363,8 +363,22 @@ I_sel(:,:,idx)=[];
 
 filtdata=finaldata;
 
-%-----------------------------------------------------------
 
+%---calculating cramer-rao lower bounds---
+
+if ndims(PSF)==5 
+    PSF3D=PSF(:,:,:,ceil((size(PSF,4)+1)/2),ceil((size(PSF,4)+1)/2));
+else
+    PSF3D=PSF; 
+end
+    
+if gain==1 || strcmp(Name(1:4),'simu')  %if the raw-data stems from a simulation, gain>1 has no influence on noise!
+    mean_signal=mean(filtdata(:,4));
+    mean_bg=mean(filtdata(:,5));
+else
+    mean_signal=mean(filtdata(:,4))/2; %considering excess noise when gain is switched on; this effectively reduces the signal number by factor 2
+    mean_bg=mean(filtdata(:,5))/2;
+end
 [CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg);
 disp('------------------');
 disp('Cramer-Rao bounds:');
@@ -380,8 +394,10 @@ clear r_mol
 c=figure(3);
 close(c);
 
+z_error=@(x) std(interp1(r_coord,z_theory,sqrt((filtdata(:,1)-x(1)).^2+(filtdata(:,2)-x(2)).^2)*1e-9,'linear','extrap')*1e9-filtdata(:,3));
+
 if strcmp(findcenter,'y')
-    batchsize=500; %batchsize for determining sphere-center
+    batchsize=1000; %batchsize for determining sphere-center
     N=ceil(length(filtdata)/batchsize);
     xc0=xc;
 
@@ -512,24 +528,68 @@ title('loc. data, z-values color-coded');
 % colorbar; 
 % title('loc. data, photon-counts color-coded');
 
-%---calculating cramer-rao lower bounds---
-if ndims(PSF)==5 
-    PSF3D=PSF(:,:,:,ceil((size(PSF,4)+1)/2),ceil((size(PSF,4)+1)/2));
-else
-    PSF3D=PSF; 
+%% plotting only "heroes", i.e. molecules that are "on" for serveral consecutive frames
+
+
+clear hero
+minlength=5; 
+bridgelength=5; 
+hero=fun_findheroes(filtdata,minlength,bridgelength); %returns filtdata of heroes in a structure array 
+no_heroes=length(hero);
+
+for m=1:no_heroes;
+        hero(m).mean=mean(hero(m).locdata);
+        hero(m).std=std(hero(m).locdata);
 end
-    
+
+hero_means=vertcat(hero.mean);
+hero_sigmas=vertcat(hero.std);
+
+%plotting 3D positions of heroes
+figure(11); 
+scatter3(hero_means(:,1),hero_means(:,2),hero_means(:,3),10);
+title(['mean 3D positions of ' num2str(no_heroes) ' heros; minlength=' num2str(minlength) '; bridgelength=' num2str(bridgelength)]);
+
+%finding best sphere center and plotting z-positions versus radial
+%coordinate
+xc_heroes=fun_find_sphere_center(xc0,r_coord,z_theory,hero_means); %finding sphere center based on hero mean positions
+
+
+
+%calculating CRLBs for heroes
 if gain==1 || strcmp(Name(1:4),'simu')  %if the raw-data stems from a simulation, gain>1 has no influence on noise!
-    mean_signal=mean(filtdata(:,4));
-    mean_bg=mean(filtdata(:,5));
+    mean_signal_heroes=mean(hero_means(:,4));
+    mean_bg_heroes=mean(hero_means(:,5));
 else
-    mean_signal=mean(filtdata(:,4))/2; %considering excess noise when gain is switched on; this effectively reduces the signal number by factor 2
-    mean_bg=mean(filtdata(:,5))/2;
+    mean_signal_heroes=mean(hero_means(:,4))/2;
+    mean_bg_heroes=mean(hero_means(:,5))/2;
 end
-    
+[CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes);
 
 
-
+figure(12); 
+subplot(2,1,1);
+r_heroes=sqrt((hero_means(:,1)-xc_heroes(1)).^2+(hero_means(:,2)-xc_heroes(2)).^2);
+errorbar(r_heroes*1e-3,hero_means(:,3),hero_sigmas(:,3),'.');
+hold on; 
+plot(r_coord*1e6,z_theory*1e9,'r')
+plot(r_coord*1e6,z_theory*1e9+[0 sqrt(CRBz_h)],'r.');
+plot(r_coord*1e6,z_theory*1e9-[0 sqrt(CRBz_h)],'r.');
+hold off; 
+ylabel('z /nm');
+xlabel('r /µm');
+xlim([0 20]); 
+grid on; 
+title(['z-pos. of ' num2str(no_heroes) ' heros; minlength=' num2str(minlength) '; bridgelength=' num2str(bridgelength)]);
+subplot(2,1,2);
+plot(r_heroes*1e-3,hero_sigmas(:,3),'.');
+hold on; 
+plot(r_coord*1e6,[0 sqrt(CRBz_h)],'r.-');
+hold off; 
+xlabel('radial distance /µm');
+ylabel('\sigma_z');
+xlim([0 20]); 
+  
 %% show details to the CURSOR-selected molecule image
 
 h=figure(3);
