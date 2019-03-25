@@ -16,7 +16,7 @@ BG_bottom=0; %background level in photons in bottom image
 
 %camera parameters
 gain=1; 
-amp=9.9 ; %set to 9.9 for andor; electrons per count 
+amp=9.9; %set to 9.9 for andor; electrons per count 
 QE=0.95; %quantum efficiency
 
 r_sphere=2.0e-3/2; %radius of calibration sphere (Alexa-coated ball lens)

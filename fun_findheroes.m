@@ -1,4 +1,4 @@
-function hero=fun_findheroes(locdata,minlength,bridgelength)
+function hero=fun_findheroes(locdata,minlength,bridgelength,binsize)
 %identify "heroes" amongst the blinking molecules, i.e. molecules that are
 %"on" for several subsequent frames
 %returned is a structure array containing information (corresponding
@@ -6,7 +6,8 @@ function hero=fun_findheroes(locdata,minlength,bridgelength)
 %minlength.....minimum number of locs contained in the blink-series
 %bridgelength....no. of empty frames in between two blink-events that
 %should still be recognized as one molecule
-
+%binsize...size of a binary pixel in nm (e.g. 50), defining the distance within which a
+%location is seen as the same molecule
 %for testing: 
 %load sphereD_substack.mat; locdata=filtdata;
 %locdata=[x_est' y_est' z_est' N_est' BG_est' resnorm_MLE' loc_no' frame_no' chi2'];
@@ -19,13 +20,13 @@ x_est=locdata(:,1);
 y_est=locdata(:,2);
 
 %---create data cube x,y,t----
-delta=100; %cube incrmenet side length in nm 
+%binsize=100; %cube increment side length in nm 
 x_min=min(x_est);
 x_max=max(x_est);
 y_min=min(y_est);
 y_max=max(y_est);
-x=x_min:delta:x_max;
-y=y_min:delta:y_max; 
+x=x_min:binsize:x_max;
+y=y_min:binsize:y_max; 
 nx=length(x);
 ny=length(y);
 frame_min=min(frame_no);
@@ -38,9 +39,12 @@ cube=boolean(zeros(nx,ny,no_frames));
 %draw "1" at positions within the cube, where molecules are located
 for m=1:N
     %disp(N-m);
-    x_pos=uint16((x_est(m)-x_min)/delta+1); %molecule position in the cube
-    y_pos=uint16((y_est(m)-y_min)/delta+1); 
-    frame_pos=frame_no(m)-frame_min+1; 
+    x_pos=ceil((x_est(m)-x_min)/binsize); %molecule position in the cube
+    y_pos=ceil((y_est(m)-y_min)/binsize); 
+    if x_pos==0; x_pos=1; end
+    if y_pos==0; y_pos=1; end
+    %frame_pos=frame_no(m)-frame_min+1; 
+    frame_pos=find(frame_vec==frame_no(m));
     cube(x_pos,y_pos,frame_pos)=1; 
     linind=sub2ind([nx,ny,no_frames],x_pos,y_pos,frame_pos);
     cubepos(m,:)=[locdata(m,:),linind]; %links filtdata with position (linear index) of the respective pixel within cube
@@ -48,10 +52,10 @@ end
 disp('done');
 
 %% quality check
-
-m=14;
-imagesc(squeeze(cube(:,m,:))'); colormap gray; 
-title('spatio-temporal slice through cube');
+% 
+% m=14;
+% imagesc(squeeze(cube(:,m,:))'); colormap gray; 
+% title('spatio-temporal slice through cube');
 
 %% convolving with a "line" in time to connect time-separated localizations frome the same molecule
 
@@ -65,9 +69,9 @@ end
 
 %% quality check
 
-m=14;
-imagesc(squeeze(cube_filt(:,m,:))'); colormap gray; 
-title(['filtered cube; section']);
+% m=14;
+% imagesc(squeeze(cube_filt(:,m,:))'); colormap gray; 
+% title(['filtered cube; section']);
 
 %% find "heroes", i.e. connected components in time
 
@@ -85,9 +89,9 @@ end
 CC2 = bwconncomp(cube2,18); %finding binary "islands"
 
 %% quality check
-m=14;
-imagesc(squeeze(cube2(:,m,:))'); colormap gray; 
-title(['filtered cube; section']);
+% m=14;
+% imagesc(squeeze(cube2(:,m,:))'); colormap gray; 
+% title(['filtered cube; section']);
 
 %% finding loc.-numbers that belong to the heroes
 

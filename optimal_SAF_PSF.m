@@ -12,7 +12,7 @@ global Z ux uk uz Ex_Px Ex_Py Ex_Pz Ey_Px Ey_Py Ey_Pz Nx n_photon bg mask
 %% calculating BFP fields for SAF
 
 %---user parameters----
-os=3; %oversampling
+os=1; %oversampling
 ux=115e-9/os; %resolution in focal space
 Nx=15*os; %desired simulated field size in pixel
 
@@ -21,21 +21,23 @@ n_photon=2000; %number of camera counts in the brightest dipole-image
 bg=100; %mean background-counts level
 
 N=128;
-lambda_0=670e-9;
-NA=1.67; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+lambda_0=680e-9;
+NA=1.67; RI=[1.33 1.33 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 %NA=1.49; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 d2=0e-9; %thickness of intermediate layer (layer 2)
 f=1.8e-3; %focal length of objective
 mu=1e-16; %magnitude of dipole (arbitrary value)
 
 %dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
-dz_vec=-450e-9; %only a single defocus 
+dz_vec=-500e-9; %only a single defocus 
+
+%load('coeff_2019-01-30_top_err0,15.mat'); %for aberrations; %deactivate
+%line to simulate aberration-free case
 
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
 %dz=-300e-9;  %defocus of objective lens (negative values mean moving the focus into the fluid)
  
-%load('coeff_2018-10-10_vectashield_err0,17.mat'); %for aberrations
 %-----------------------
 
 [SA_out,Defocus,~] =fun_SA_RImismatch(N,RI(3),RI(3),NA,lambda_0,1); %Defocus function refers to refractive index n2
@@ -93,14 +95,16 @@ disp('done');
 
 clear I_BFP ratio I_BFP
 
-for m=1:length(z_vec); %BFP image number
+for m=1:length(z_vec) %BFP image number
 
     %user-defined additional pupil mask (incorporates objective transmission profile):
         phase=(0)*pupil_UAF;
         mask=pupil.*sqrt(obj_transm).*exp(1i*phase+1i*aberr+1i*dz*Defocus);
 
         figure(1);
-        I_BFP(m,:,:)=(abs(Ex_Px(:,:,m).*mask).^2+abs(Ex_Py(:,:,m).*mask).^2+abs(Ey_Px(:,:,m).*mask).^2+abs(Ey_Py(:,:,m).*mask).^2+abs(Ex_Pz(:,:,m).*mask).^2+abs(Ey_Pz(:,:,m).*mask).^2);
+        %I_BFP(m,:,:)=(abs(Ex_Px(:,:,m).*mask).^2+abs(Ex_Py(:,:,m).*mask).^2+abs(Ey_Px(:,:,m).*mask).^2+abs(Ey_Py(:,:,m).*mask).^2+abs(Ex_Pz(:,:,m).*mask).^2+abs(Ey_Pz(:,:,m).*mask).^2);
+        I_BFP(m,:,:)=abs(mask).^2.*(abs(Ex_Px(:,:,m)).^2+abs(Ex_Py(:,:,m)).^2+abs(Ey_Px(:,:,m)).^2+abs(Ey_Py(:,:,m)).^2+abs(Ex_Pz(:,:,m)).^2+abs(Ey_Pz(:,:,m)).^2);
+
         %I_BFP(m,:,:)=(abs(Ex_Pz(:,:,m).*mask).^2+abs(Ey_Pz(:,:,m).*mask).^2); %z-dipole
         
         imagesc(squeeze(I_BFP(m,:,:))); %axis equal; axis tight; colorbar; colormap gray;
@@ -116,7 +120,6 @@ figure(2);
 plot(z_vec*1e9,ratio); xlabel('z / nm'); ylabel('SAF/UAF ratio'); grid on;
 title(['NA=' num2str(NA) ', RIs=' num2str(RI) ', \lambda_0=' num2str(lambda_0*1e9)]);
 hold on;
-
 
 %% -----calculating PSF as seen on the camera for different emitter z-positions-----
 % calc of CCD images and CRBs for all z-values contained in z_vec
@@ -298,7 +301,7 @@ end
 end  %end of mm-index loop 
 
 PSFpath='c:/users/q004aj/desktop/PSFs/';
-%save([PSFpath 'PSF_' num2str(Nx/os) 'x' num2str(Nx/os) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree_os3.mat'],'PSF_tot','PSF_UAF','z_vec','ux','NA','RI','os');
+%save([PSFpath 'PSF_' num2str(Nx/os) 'x' num2str(Nx/os) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberr-2019-01-30_os3.mat'],'PSF_tot','PSF_UAF','z_vec','ux','NA','RI','os');
 
 
 %% optional: preparing 5D-PSF-model for use with "MLE_fit_molecules_exp" or "MLE_fit_molecules_2channels_exp"
@@ -336,7 +339,8 @@ disp('done');
 PSF5D(isnan(PSF5D))=0;
 
 PSFpath='c:/users/q004aj/desktop/PSFs/';
-%save([PSFpath 'PSF5D_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree_os3.mat'],'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
+name=[PSFpath 'PSF5D_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree_os3.mat'];
+%save(name,'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
 
     
 %% ---calculating CRBs----
@@ -351,7 +355,8 @@ PSFpath='c:/users/q004aj/desktop/PSFs/';
     %PSF_tot=PSF_B; %single channel 
     %PSF_tot=PSF_defocus; %if a "defocus"-stack has been calculated
     
-[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot./repmat(sum(sum(PSF_tot,1),2),[size(PSF_tot,1) size(PSF_tot,2) 1]),ux,uz,n_photon,bg/os^2); %note that if PSF is oversampled the background needs to be adapted correspondingly
+gain=1;    
+[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot./repmat(sum(sum(PSF_tot,1),2),[size(PSF_tot,1) size(PSF_tot,2) 1]),ux,uz,n_photon,bg/os^2,gain); %note that if PSF is oversampled the background needs to be adapted correspondingly
 figure(4);
 plot((1:length(CRBz))*uz*1e9,sqrt(CRBz),'b.-'); xlabel('z-pos in nm'); ylabel('nm');
 title(['sqrt(CRBz), cts=' num2str(n_photon) ', bg=' num2str(bg)]); grid on;
@@ -390,13 +395,13 @@ metric2=mean(sqrt(CRBz));
 %clear Z
 a=[1 0]; %phase-step between UAF and SAF
 no_modes=2;
-%Z(:,:,1)=pupil_UAF;
+Z(:,:,1)=pupil_UAF;
 %Z(:,:,1)=a(1)*zernike_modes(N,N,[ones(1,3) 1]);
 %Z(:,:,2)=a(1)*zernike_modes(N,N,[ones(1,10) 1]);
 %Z(:,:,3)=a(1)*zernike_modes(N,N,[ones(1,21) 1]);
 %Z=ZernikeCalc([4,11,22],[1 1 1]',pupil,'NOLL');
 
-Z(:,:,1)=Defocus*1e-6; 
+%Z(:,:,1)=Defocus*1e-6; 
 %Z(:,:,2)=[];
 a_ini=[0];
 

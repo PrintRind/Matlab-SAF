@@ -97,8 +97,8 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
             
         else
             if showimage
-                imagesc(I); axis equal; axis tight; title(['sig./ bg =' num2str(N_est) ' / ' num2str(BG_est)]); 
-                pause(0);
+                %imagesc(I); axis equal; axis tight; title(['sig./ bg =' num2str(N_est) ' / ' num2str(BG_est)]); 
+                %pause(0);
             end
         end
         

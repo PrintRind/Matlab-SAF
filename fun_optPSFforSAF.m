@@ -10,7 +10,7 @@ a2(1,1,:)=a;
 phase=sum(repmat(a2,[size(Z,1),size(Z,2),1]).*Z,3); %pupil phase calculation
 imagesc(phase); title('pupil phase'); pause(0.1);
 
-for m=1:size(Ex_Px,3);
+for m=1:size(Ex_Px,3)
     I_xx=abs(czt2(Ex_Px(:,:,m).*exp(1i*phase).*mask,uk,ux,Nx)).^2;
     I_yx=abs(czt2(Ey_Px(:,:,m).*exp(1i*phase).*mask,uk,ux,Nx)).^2;
     I_xy=abs(czt2(Ex_Py(:,:,m).*exp(1i*phase).*mask,uk,ux,Nx)).^2;
@@ -24,10 +24,10 @@ figure(2);
 imagesc(PSF(:,:,1)); 
 
 figure(3);
-[CRBx,CRBy,CRBz]=fun_CRB(PSF,ux,uz,n_photon,bg);
+[CRBx,CRBy,CRBz]=fun_CRB(PSF,ux,uz,n_photon,bg,1);
 plot(sqrt(CRBz)); pause(0);
 
 metric1=mean(sqrt((CRBx.*CRBy.*CRBz)).^(1/3));  %"localization volume"
 metric2=mean(sqrt(CRBz)); 
 
-metric=metric1;
+metric=metric2;
