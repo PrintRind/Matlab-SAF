@@ -6,7 +6,7 @@ function hero=fun_findheroes(locdata,minlength,bridgelength,binsize)
 %minlength.....minimum number of locs contained in the blink-series
 %bridgelength....no. of empty frames in between two blink-events that
 %should still be recognized as one molecule
-%binsize...size of a binary pixel in nm (e.g. 50), defining the distance within which a
+%binsize...x-y-size of a binary pixel in nm (e.g. 50), defining the distance within which a
 %location is seen as the same molecule
 %for testing: 
 %load sphereD_substack.mat; locdata=filtdata;
@@ -110,7 +110,12 @@ for m=1:CC2.NumObjects
     hero(m).locdata=tmp;
 end
 
-disp([num2str(numel(hero)) ' heroes found']);
+if exist('hero') %if at least a single hero has been found
+    disp([num2str(numel(hero)) ' heroes found']);
+else
+    disp('no heroes found'); 
+    hero=[];
+end
 disp('done');
 
 

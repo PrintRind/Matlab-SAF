@@ -1,4 +1,4 @@
-function est=fun_MLE(I,PSF_norm,interp_incr,x_data,z_ini,resnorm_thresh,showimage)
+function est=fun_MLE(I,PSF_norm,interp_incr,x_data,z_ini_info,resnorm_thresh,showimage)
 %function provides position, signal and background estimate of
 %single-molecule images using MLE approach
 %inputs: 
@@ -42,20 +42,26 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
         param_ini=[BG00 max(I(:))-BG00 0 0 1]; %[offset amplitude x-shift y-shift width]; initial parameters for Gaussfit
         lb=[0 0.5*(max(I(:))-BG00) -nx/3 -nx/3 0.5]; %lower bounds for fit-parameters
         ub=[10*BG00 1.5*(max(I(:))-BG00) nx/3 nx/3 3]; %upper bounds
-        [Param,~,~,~]=lsqcurvefit(@fun_gauss_and_offset_test,param_ini,x_data,I,lb,ub);
-        Gaussfit=fun_gauss_and_offset_test(Param,x_data);
+        [Param,~,~,~]=lsqcurvefit(@fun_gauss_and_offset,param_ini,x_data,I,lb,ub);
+        %Gaussfit=fun_gauss_and_offset_test(Param,x_data);
         x0=Param(3); %in pixels (vertical direction in image I)
         y0=Param(4); %in pixels
         BG0=Param(1); %this serves as initial estimate for the MLE fit
         %N0=Param(2)*2*pi*Param(5)^2; %energy contained (see e.g. formula in Thunderstorm script)
         N0=sum(I(:))-BG0*nx*ny; %initial guess for number of photons - seems to work better 
-          
+        if isscalar(z_ini_info) %info about initial z-estimate
+            z_ini=z_ini_info;
+        else  %if provided z_ini_info is not scalar, then is describes a z_ini versus Gaussian-width-curve which provides a good initial z-estiamte based on the Gaussian fit width
+            z_ini=interp1(z_ini_info,1:nz0,Param(5),'linear',nz0/2);
+        end
+        
+            
+        
         %----MLE estimation----------    
-        %z_ini=80; %initial z-estimate (frame-no.)
         if ndims(PSF_norm)==3
             gauss_est=[x0 y0 z_ini N0 BG0]; %initial estimates (e.g. from Gaussfit)
-            LB=[-nx/3 -ny/3 0 0.5*N0 0.5*BG0]; %lower bounds
-            UB=[+nx/3 +ny/3 nz0 2*N0 2*BG0]; %upper bounds
+            LB=[-nx/3 -ny/3 0 0.25*N0 0.25*BG0]; %lower bounds
+            UB=[+nx/3 +ny/3 nz0 4*N0 4*BG0]; %upper bounds
             tmp=fminsearchbnd(fun_LLH,gauss_est,LB,UB);
             x_est=tmp(1);
             y_est=tmp(2);
@@ -68,16 +74,15 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
             gauss_est=[cx+x0/interp_incr cy+y0/interp_incr z_ini-1 N0 BG0]; %initial estimates (e.g. from Gaussfit)
             %gauss_est=[x0/(interp_incr/os) y0/(interp_incr/os) z_ini N0 BG0]; %initial estimates (e.g. from Gaussfit)
 
-            LB=[0 0 0 0.5*N0 0.5*BG0]; %lower bounds
-            UB=[nxi-1 nyi-1 nz0-1 2*N0 2*BG0]; %upper bounds
+            LB=[0 0 0 0.25*N0 0.25*BG0]; %lower bounds
+            UB=[nxi-1 nyi-1 nz0-1 4*N0 4*BG0]; %upper bounds
             tmp=fminsearchbnd(fun_LLH,gauss_est,LB,UB);
             x_est=-(cx-(tmp(1)+1))*(interp_incr); %converting back to (camera) pixels
             y_est=-(cy-(tmp(2)+1))*(interp_incr);
             z_est=tmp(3)+1;
             N_est=tmp(4);
             BG_est=tmp(5);
-           
-            %residual calc. 
+          
             I_model=tmp(5)+tmp(4)*PSF_norm((fw+1:nx0-fw),(fw+1:nx0-fw),uint8(tmp(3))+1,uint8(tmp(2))+1,uint8(tmp(1))+1);
             resnorm_MLE=sum(abs(I_model(:)-I(:)).^2)/(BG_est+N_est)^2; 
         end

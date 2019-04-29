@@ -5,13 +5,15 @@ clear all;
 %% user parameters 
 
 %camera parameters
-gain=50;  %set gain to 1 if gain is switched off
-amp=9.9; %9.9; %electrons per count 
+gain=1;  %set gain to 1 if gain is switched off
+amp=9.8; %9.9; %electrons per count 
 QE=0.95; %quantum efficiency
-ux=115e-9; %effective camera pixel size
+ux=117e-9; %effective camera pixel size
 r_sphere=2.0e-3/2; %radius of sphere
 
+sample='sphere'; %type of sample, e.g. 'sphere', 'cos7', etc.
 qual_thresh=inf; %quality thrshold for MLE-fits (bad fits are discarded from the data); %the smaller the value the stricter is the selection.
+
 
 %% loading PSF model
 
@@ -21,8 +23,9 @@ PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 %load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
 
 %5D PSFs: (faster)
-%load([PSFpath 'PSF5D_0-2-250nm_RI=1,45_dz=-400_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1,45_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+%load([PSFpath 'PSF5D_fine_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+%load([PSFpath 'PSF5D_13x13_0-0.5-10nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; 
 %load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.45_dz=-600_aberr-2019-01-30_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 
 ux=ux*os; 
@@ -31,15 +34,17 @@ ux=ux*os;
 %no change of molecule distance from the coverslip)
 %load('PSF5D_defocus_dz=-700 to -200nm_RI=1,45_aberrfree.mat'); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 
-
 if length(z_vec)>1
     z=z_vec; %PSF model describes an "SAF-PSF" (fixed objetive defocus, but varying molecule distances from the coverslip
 else
     z=dz_vec; %PSF model describes a "defocus" PSF (fixed mol. distance, but varying objective defoci
 end
 
-z_ini=round(size(PSF,3)/2); %initial z-estimate (frame-no of PSF-stack)
-
+if exist('sigma')
+    z_ini_info=sigma/os; %if the loaded PSF-model contains a vector called "sigma"; sigma represents a gaussian-width-versus-z_ini-curve which provides a good initial z-estimate
+else  %otherwise, take the center-value of the entire z-range as initial estimate for z
+    z_ini_info=round(size(PSF,3)/2); %constant initial z-estimate (frame-no of PSF-stack)
+end
 
 if ndims(PSF)==3 %if "standard" 3D PSF is loaded (no interpolation in MLE necessary -> faster)
     [nx0,ny0,nz0]=size(PSF); %size of model    clear PSF_tot;
@@ -75,7 +80,7 @@ BGmask=zeros(nx,ny);
 BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
-use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
+use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data
 [Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
@@ -189,15 +194,16 @@ imagesc(data_corr(:,:,5));
 %% METHOD B: using thunderstorm coordinates
 % (works for 3D and 5D PSF models)
 
-tmp= csvread('TS.csv',1,0);
-TS=tmp(1:50000,:);%select parts of the entire data
-%
+tmp= csvread('TS_bottom.csv',1,0);
+%TS=tmp(1:5000,:);%select parts of the entire data
+TS=tmp;
+
 if size(TS,2)<10 %adding extra columns if TS-matrix has too few
     TS=[TS zeros(size(TS,1),10-size(TS,2))];
 end
         
 %data pre-filtering options
-thresh_dist=1000; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
+thresh_dist=2000; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
 thresh_sigma=1*max(TS(:,5)); %sigma of Gaussian fit in nm
 thresh_uncert=1*max(TS(:,10)); %
 TS_filt = RmNN(TS(end,2),TS,thresh_dist,thresh_sigma,thresh_uncert); %picking only those molecule images with no neighbours in the vicinity
@@ -233,7 +239,7 @@ for mm=1:loc_no_tot
         showimage=0;
     end
         
-    est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini,qual_thresh,showimage);
+    est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini_info,qual_thresh,showimage);
     %est=fun_MLE_fast(I(:,:,mm),PSF_norm,interp_incr,z_ini,qual_thresh,[relpos(mm,:) TS(mm,6:7)/amp],showimage)
     
     if isempty(est) %if resnorm is too large, function returns est=[]
@@ -284,25 +290,29 @@ finaldata=locdata_TS;
 I_sel=I; %selected images
 
 % %DRIFT CORRECTION - interpolating frame-dependent drift values from the Thunderstorm-curves
-% drift_x=interp1(drift(2:end,1),drift(2:end,2),finaldata(:,8));
-% drift_y=interp1(drift(2:end,3),drift(2:end,4),finaldata(:,8));
-% plot(drift_x); hold on; plot(drift_y); xlabel('frame no.'); ylabel('drift/pix'); hold off; 
-% finaldata(:,1)=finaldata(:,1)-1*drift_y*ux*1e9;
-% finaldata(:,2)=finaldata(:,2)-1*drift_x*ux*1e9;
-% 
+if exist('drift')
+    drift_x=interp1(drift(2:end,1),drift(2:end,2),finaldata(:,8));
+    drift_y=interp1(drift(2:end,3),drift(2:end,4),finaldata(:,8));
+    plot(drift_x); hold on; plot(drift_y); xlabel('frame no.'); ylabel('drift/pix'); hold off; 
+    finaldata(:,1)=finaldata(:,1)-1*drift_y*ux*1e9;
+    finaldata(:,2)=finaldata(:,2)-1*drift_x*ux*1e9;
+    disp(' ');
+    disp('drift corrected');
+end
+
 % finaldata=finaldata0; 
 % -----data eval----- finding optimal sphere center and plotting z-estimates against distance from sphere center
 
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=25e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
+    r_cutoff=12e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
 %manually defining sphere center
-    xc=[10 10]*1e3; %[x,y]
-    %xc=[1 1]*size(data,1)/2*ux*1e9;
-    findcenter='n'; %automatic center-finding? set to 'y' or 'n'
+    %xc=[14.18 15.51]*1e3; %[x,y]
+    xc=[1 1]*size(data,1)/2*ux*1e9; %center of image (for simus)
+    findcenter='y'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
-    no_c=inf; %central local. no.
+    no_c=0; %central local. no.
     no_delta=inf;  %half width, set inf to get all data
 %selecting a defined azimuthal section of the sphere 
     phi_c=0; %central angle of cake-slice (in deg.)
@@ -361,46 +371,69 @@ I_sel(:,:,idx)=[];
 
 filtdata=finaldata;
 
-%---calculating cramer-rao lower bounds---
+% deleting NaNs from filtdata
+tmp=isnan(filtdata);
+[tmp_row,tmp_col]=find(tmp);
+filtdata(tmp_row,:)=[];
 
-if ndims(PSF)==5 
-    PSF3D=PSF(:,:,:,ceil((size(PSF,4)+1)/2),ceil((size(PSF,4)+1)/2));
-else
-    PSF3D=PSF; 
-end
- 
 mean_signal=mean(filtdata(:,4));
 mean_bg=mean(filtdata(:,5));
-[CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg,gain);
-disp('------------------');
-disp('Cramer-Rao bounds:');
-disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
-disp(['min. sqrt(CRLB-y): ' num2str(min(sqrt(CRBy(:))),3)]);
-disp(['min. sqrt(CRLB-z): ' num2str(min(sqrt(CRBz(:))),3)]);
+
+%---calculating cramer-rao lower bounds---
+if exist('PSF')
+    if ndims(PSF)==5 
+        PSF3D=PSF(:,:,:,ceil((size(PSF,4)+1)/2),ceil((size(PSF,4)+1)/2));
+    else
+        PSF3D=PSF; 
+    end
+    
+    [CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg,gain);
+    disp('------------------');
+    disp('Cramer-Rao bounds:');
+    disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
+    disp(['min. sqrt(CRLB-y): ' num2str(min(sqrt(CRBy(:))),3)]);
+    disp(['min. sqrt(CRLB-z): ' num2str(min(sqrt(CRBz(:))),3)]);
+    
+end
 
 %%---automatically finding optimal sphere-center: 
 r_coord=linspace(0,25,size(PSF,3))*1e-6; %radial coord. in m
 z_theory=r_sphere-sqrt(r_sphere^2-(r_coord).^2);
 CRBz_extrapol=interp1(z_vec,[CRBz CRBz(end)],z_theory); 
 
-clear r_mol
-c=figure(3);
-close(c);
+clear r_mol z_batchmean
+%c=figure(3);
+%close(c);
 
 z_error=@(x) std(interp1(r_coord,z_theory,sqrt((filtdata(:,1)-x(1)).^2+(filtdata(:,2)-x(2)).^2)*1e-9,'linear','extrap')*1e9-filtdata(:,3));
 
-if strcmp(findcenter,'y')
-    batchsize=inf; %batchsize for determining sphere-center
-    N=ceil(length(filtdata)/batchsize);
+if strcmp(findcenter,'y') && strcmp(sample,'sphere')
+    
+    batchsize=500; %batchsize for determining sphere-center
+    z_driftcorr='n'; %should a z-drift correction be done?
+    N=max(ceil(length(filtdata)/batchsize),1);
     xc0=xc;
 
     for m=1:N %determining sphere center for each batch of data
-       batch=filtdata((1+(m-1)*batchsize):min((1+m*batchsize),length(filtdata)),:);
+       batch=filtdata((1+(m-1)*min(batchsize,1e10)):min((1+m*batchsize),length(filtdata)),:);
        xc(m,:)=fun_find_sphere_center(xc0,r_coord,z_theory,batch);
+       %xc(m,:)=xc0; %don't find sphere center
        xc0=xc(m,:);
        r_mol{m}=sqrt((batch(:,1)-(xc(1))).^2+(batch(:,2)-(xc(2))).^2)*1e-9; %radial molecule coords. in meter
        delta_z(m)=z_error(xc(m,:)); %standard deviation in nm 
-       z_batchmean(m)=mean(batch(:,3)); %mean z-value of batch; to identify z-drifts
+       
+       if strcmp(z_driftcorr,'y')
+           %select x-y-subregion; in this region the mean z-value is used as a
+           %measure for drift; drift is then corrected
+           x_min=14e3; %for z-drift identificatoin
+           x_max=18e3; 
+           y_min=14e3;
+           y_max=18e3;
+           subbatch=batch((batch(:,1)>x_min)&(batch(:,1)<x_max)&(batch(:,2)>y_min)&(batch(:,2)<y_max),:);
+           z_batchmean(m)=mean(subbatch(:,3)); %mean z-value of batch; to identify z-drifts
+       else
+           z_batchmean(m)=0;
+       end
        
        %----MAIN PLOT: plotting radial distance versus estimated z-positions-----
         figure(3);
@@ -434,23 +467,26 @@ else
         r_mol=sqrt((filtdata(:,1)-(xc(1))).^2+(filtdata(:,2)-(xc(2))).^2)*1e-9; %radial molecule coords. in meter
         delta_z=z_error(xc);
         
-        figure(3);
-        %markercolor=(filtdata(:,8)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
-        markercolor=[0 0 0];
-        markersize=1;
-        scatter(r_mol*1e6,filtdata(:,3),markersize,markercolor); grid on; %colorbar; 
-        hold on; 
-        plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
-        plot(r_coord*1e6,z_theory*1e9+[sqrt(CRBz_extrapol)],'r--');
-        plot(r_coord*1e6,z_theory*1e9-[sqrt(CRBz_extrapol)],'r--');
-        xlabel('radial coord / µm');
-        ylabel('z /  nm');
-        title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual=' num2str(qual_thresh) ', sig/bg=' num2str(mean(filtdata(:,4)),4) '/' num2str(mean(filtdata(:,5)),3)]);
-        grid on;
-        ylim([0 250]);
-        xlim([0 20]);
-        colormap jet; 
-        hold off;
+        if strcmp(sample,'sphere')
+            figure(3);
+            markercolor=(filtdata(:,8)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
+            markercolor=[0 0 0];
+            markersize=2;
+            scatter(r_mol*1e6,filtdata(:,3),markersize,markercolor); grid on; %colorbar; 
+            hold on; 
+            %plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
+            plot(r_coord*1e6,z_theory*1e9+[sqrt(CRBz_extrapol)],'r--');
+            plot(r_coord*1e6,z_theory*1e9-[sqrt(CRBz_extrapol)],'r--');
+            xlabel('radial coord / µm');
+            ylabel('z /  nm');
+            title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual=' num2str(qual_thresh) ', sig/bg=' num2str(mean(filtdata(:,4)),4) '/' num2str(mean(filtdata(:,5)),3)]);
+            grid on;
+            ylim([0 250]);
+            xlim([0 20]);
+            colormap jet; 
+            hold off;
+        end
+        
 end
 figure(3);
 hold off;
@@ -523,7 +559,7 @@ title('loc. data, z-values color-coded');
 
 %% show details to the CURSOR-selected molecule image
 
-h=figure(3);
+h=figure(6);
 dcm_obj = datacursormode(h);
 c_info = getCursorInfo(dcm_obj); 
 
@@ -538,69 +574,106 @@ title(['z=' num2str(filtdata(selected_loc_no,3),4)]);
 
 %% plotting only "heroes", i.e. molecules that are "on" for serveral consecutive frames
 
-clear hero
-minlength=5; 
-bridgelength=0; 
-binsize=100; 
-hero=fun_findheroes(filtdata,minlength,bridgelength,binsize); %returns filtdata of heroes in a structure array 
-no_heroes=length(hero);
+%clear hero
+minlength=8; %minimum frame-no a hero is on
+bridgelength=0; %length of allowed "dark" frames in between on-frames
+binsize=50; %side length of spatial bins in nm
+  
+batchsize=10e3; 
+hero=[];
+for mm=1:floor(length(filtdata)/batchsize) %for long data sets: evaluating in batches 
+    
+    disp(['processing batch no. ' num2str(mm)]); 
+    idx0=(mm-1)*batchsize+1; 
+    tmp=fun_findheroes(filtdata(idx0:(idx0+batchsize),:),minlength,bridgelength,binsize); %returns filtdata of heroes in a structure array 
+    hero=[hero,tmp];
+end
+    
+    no_heroes=length(hero);
 
-for m=1:no_heroes
-        hero(m).mean=mean(hero(m).locdata);
-        hero(m).std=std(hero(m).locdata);
+    for m=1:no_heroes
+            hero(m).mean=mean(hero(m).locdata);
+            hero(m).std=std(hero(m).locdata);
+            hero(m).lengths=length(hero(m).locdata);
+    end
+
+    hero_means=vertcat(hero.mean);
+    hero_sigmas=vertcat(hero.std);
+    hero_lengths=vertcat(hero.lengths);
+
+    % plotting 3D positions of heroes
+    figure(11); 
+    colormap jet; 
+    markercolor=hero_sigmas(:,3);
+    scatter3(hero_means(:,1),hero_means(:,2),hero_means(:,3),10,markercolor);
+    title(['mean 3D positions of ' num2str(no_heroes) ' heros; minlength=' num2str(minlength) '; bridgelength=' num2str(bridgelength)]);
+    h = colorbar;
+    ylabel(h, '\sigma_z / nm');
+
+    %calculating CRLBs for heroes
+    mean_signal_heroes=mean(hero_means(:,4));
+    mean_bg_heroes=mean(hero_means(:,5));
+    [CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes,gain);
+    CRBz_h_extrapol=interp1(z_vec,[CRBz_h CRBz_h(end)],z_theory); 
+
+%% --- plotting z-mean vs. z-sigmas
+
+hero_sigmas_normed=hero_sigmas(:,3).*sqrt(hero_means(:,4)/mean_signal_heroes); %normalized standard deviations
+
+if strcmp(sample,'sphere') % if sample is sphere
+    %finding best sphere center and plotting z-positions versus radial
+    %coordinate
+
+    xc_heroes=fun_find_sphere_center(xc0,r_coord,z_theory,hero_means); %finding sphere center based on hero mean positions
+    xc_heroes=[9.1 12.4]*1e3; %change sphere-center manually
+
+    figure(12); 
+    subplot(2,1,1);
+    r_heroes=sqrt((hero_means(:,1)-xc_heroes(1)).^2+(hero_means(:,2)-xc_heroes(2)).^2);
+    errorbar(r_heroes*1e-3,hero_means(:,3),hero_sigmas_normed,'.');
+    hold on; 
+    plot(r_coord*1e6,z_theory*1e9,'r')
+    plot(r_coord*1e6,z_theory*1e9+[sqrt(CRBz_h_extrapol)],'r.');
+    plot(r_coord*1e6,z_theory*1e9-[sqrt(CRBz_h_extrapol)],'r.');
+    hold off; 
+    ylabel('z /nm');
+    xlabel('r /µm');
+    xlim([0 20]); 
+    grid on; 
+    title(['z-pos. of ' num2str(no_heroes) ' heroes; minlength=' num2str(minlength) '; bridgelength=' num2str(bridgelength) ' xc=' num2str(xc_heroes/1000,4)]);
+    subplot(2,1,2);
+    plot(r_heroes*1e-3,hero_sigmas(:,3),'.');
+    hold on; 
+    plot(r_coord*1e6,[0 sqrt(CRBz_h)],'r.-');
+    %hold off; 
+    xlabel('radial distance /µm');
+    ylabel('\sigma_z');
+    xlim([0 20]); 
+else
+    figure(12);
+    %color=hero_means(:,8);%-min(hero_means(:,8));
+    color=hero_lengths; 
+    %----scatterplot----
+    %scatter(hero_means(:,3),hero_sigmas_normed,[],color,'.');
+    %ylim([0 30]); xlim([0 220]);
+    %----with x-errorbars---
+    errorbar(hero_means(:,3),hero_sigmas_normed,hero_sigmas(:,3)./sqrt(hero_lengths),'horizontal','.'); 
+    ylim([0 30]); xlim([0 210]);
+    
+    xlabel('mean z-value / nm');
+    ylabel('\sigma_z / nm'); grid on;
+    title(['normalized \sigma_z of heroes, binsze=' num2str(binsize) ' nm, minleng.=' num2str(minlength) '; bridgeleng.=' num2str(bridgelength)]);
+    hold on; 
+    plot(linspace(0,250,length(CRBz_h)),sqrt(CRBz_h)+0,'--');
+    hold off; 
+    colormap jet; colorbar;  
+    
 end
 
-hero_means=vertcat(hero.mean);
-hero_sigmas=vertcat(hero.std);
-
-% plotting 3D positions of heroes
-figure(11); 
-colormap jet; 
-markercolor=hero_sigmas(:,3);
-scatter3(hero_means(:,1),hero_means(:,2),hero_means(:,3),10,markercolor);
-title(['mean 3D positions of ' num2str(no_heroes) ' heros; minlength=' num2str(minlength) '; bridgelength=' num2str(bridgelength)]);
-h = colorbar;
-ylabel(h, '\sigma_z / nm');
-
-%finding best sphere center and plotting z-positions versus radial
-%coordinate
-xc_heroes=fun_find_sphere_center(xc0,r_coord,z_theory,hero_means); %finding sphere center based on hero mean positions
-
-%calculating CRLBs for heroes
-mean_signal_heroes=mean(hero_means(:,4));
-mean_bg_heroes=mean(hero_means(:,5));
-[CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes,gain);
-CRBz_h_extrapol=interp1(z_vec,[CRBz_h CRBz_h(end)],z_theory); 
-
-%%
-xc_heroes=[9.1 12.4]*1e3; %change sphere-center manually
-
-figure(12); 
-subplot(2,1,1);
-r_heroes=sqrt((hero_means(:,1)-xc_heroes(1)).^2+(hero_means(:,2)-xc_heroes(2)).^2);
-errorbar(r_heroes*1e-3,hero_means(:,3),hero_sigmas(:,3),'.');
-hold on; 
-plot(r_coord*1e6,z_theory*1e9,'r')
-plot(r_coord*1e6,z_theory*1e9+[sqrt(CRBz_h_extrapol)],'r.');
-plot(r_coord*1e6,z_theory*1e9-[sqrt(CRBz_h_extrapol)],'r.');
-hold off; 
-ylabel('z /nm');
-xlabel('r /µm');
-xlim([0 20]); 
-grid on; 
-title(['z-pos. of ' num2str(no_heroes) ' heroes; minlength=' num2str(minlength) '; bridgelength=' num2str(bridgelength) ' xc=' num2str(xc_heroes/1000,4)]);
-subplot(2,1,2);
-plot(r_heroes*1e-3,hero_sigmas(:,3),'.');
-hold on; 
-plot(r_coord*1e6,[0 sqrt(CRBz_h)],'r.-');
-hold off; 
-xlabel('radial distance /µm');
-ylabel('\sigma_z');
-xlim([0 20]); 
   
 %% plot time traces of heroes 
 
-m=2; 
+m=1; 
 meancorr=1;
 %for m=1:no_heroes
     markersize=3; 
@@ -615,7 +688,7 @@ meancorr=1;
     %hold on;
     grid on; 
     subplot(3,1,3);
-    scatter(hero(m).locdata(:,8),hero(m).locdata(:,3)-meancorr*hero_means(m,3),markersize); ylabel('z /nm');
+    scatter(hero(m).locdata(:,8),hero(m).locdata(:,3)-0*meancorr*hero_means(m,3),markersize); ylabel('z /nm');
     %hold on;
     xlabel('frame no.');
     grid on; 
@@ -659,10 +732,10 @@ scatter3(hero(m).mean(1),hero(m).mean(2),hero(m).mean(3),10,'r');
 hold off; 
 axis equal; axis tight; 
 
+hero(m).std(3)
 
 
-
-%% -----polynomial fit through data to provide better precision estimate-----
+%% -----for sphere: polynomial fit through data to provide better precision estimate-----
 % %fitcoefs=polyfit(r_mol*1e6,filtdata(:,3),2);
 % %fitcurve=polyval(fitcoefs,r_mol*1e6);
 
@@ -684,14 +757,14 @@ title(['polynomial fit; std=' num2str(delta_z2,2) ' nm; qual-thresh=' num2str(qu
 
 figure(6);
 [px, py] = getpts(gcf);
-boxrad=500; %in nm; side length of squared selection "box" around selected point
+boxrad=300; %in nm; side length of squared selection "box" around selected point
 
 for m=1:length(px)
     idx=find(logical(abs(filtdata(:,1)-px(m)*1e3)<=boxrad) & logical(abs(filtdata(:,2)-py(m)*1e3)<=boxrad)); %finding indices of localizations that are within the selected area
     
     figure(9);
     markersize=2;
-    markercolor=filtdata(idx,3);% markercolor=uint8(markercolor);
+    markercolor=filtdata(idx,8);% markercolor=uint8(markercolor);
 
     scatter3(filtdata(idx,1)/1e3,filtdata(idx,2)/1e3,filtdata(idx,3),markersize,markercolor);
     xlabel('x / µm');
@@ -707,7 +780,8 @@ for m=1:length(px)
     disp(['x-pos (mean/std) = ' num2str(x_mean(m)/1e3,3) 'µm /' num2str(x_std(m),3) 'nm']);
     disp(['y-pos (mean/std) = ' num2str(y_mean(m)/1e3,3) 'µm /' num2str(y_std(m),3) 'nm']);
     disp(['z-pos (mean/std) = ' num2str(z_mean(m),3) 'nm /' num2str(z_std(m),3) 'nm']);
-
+    colormap jet; 
+    
     figure(10);
     subplot(3,1,1);
     plot(filtdata(idx,8),filtdata(idx,1),'.');

@@ -12,18 +12,18 @@ global Z ux uk uz Ex_Px Ex_Py Ex_Pz Ey_Px Ey_Py Ey_Pz Nx n_photon bg mask
 %% calculating BFP fields for SAF
 
 %---user parameters----
-os=1; %oversampling
-ux=115e-9/os; %resolution in focal space
+os=3; %oversampling
+ux=117e-9/os; %resolution in focal space
 Nx=15*os; %desired simulated field size in pixel
 
 noise='n';  %set to 'y' or 'n'
-n_photon=2000; %number of camera counts in the brightest dipole-image
-bg=100; %mean background-counts level
+n_photon=1000; %number of camera counts in the brightest dipole-image
+bg=00; %mean background-counts level
 
-N=128;
-lambda_0=680e-9;
-NA=1.67; RI=[1.33 1.33 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
-%NA=1.49; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+N=64;
+lambda_0=670e-9;
+NA=1.67; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
+%NA=1.40; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 d2=0e-9; %thickness of intermediate layer (layer 2)
 f=1.8e-3; %focal length of objective
 mu=1e-16; %magnitude of dipole (arbitrary value)
@@ -124,7 +124,7 @@ hold on;
 %% -----calculating PSF as seen on the camera for different emitter z-positions-----
 % calc of CCD images and CRBs for all z-values contained in z_vec
 
-fits='n'; %perform fits to the PSFs? This will slow down the loop; choose 'y' or 'n'
+fits='y'; %perform fits to the PSFs? This will slow down the loop; choose 'y' or 'n'
 
 clear PSF_tot PSF_SAF PSF_UAF Gfit_UAF Gfit_SAF
 
@@ -242,9 +242,12 @@ for m=1:length(z_vec)
         lb=[0 0 -length(x_vec)/2 -length(x_vec)/2 0.5]; %lower bounds for fit-parameters
         ub=[max(tmp(:)) max(tmp(:)) length(x_vec)/2 length(x_vec)/2 length(x_vec)/2]; %upper bounds
         [Param,resnorm,residual,exitflag]=lsqcurvefit(@fun_gauss_and_offset_test,param_ini,x_data,tmp,lb,ub);
-        Gaussfit=fun_gauss_and_offset_test(Param,x_data);
+        Gaussfit=fun_gauss_and_offset(Param,x_data);
         Gfit_tot(m)=Param(2)*2*pi*Param(5)^2; %energy contained (see e.g. formula in Thunderstorm script)
-    % 
+        sigma(m)=Param(5);
+        
+        
+        % 
         %FIT METHOD B: two Gaussians with offset: [offset amp1 x-shift y-shift width1 amp2 width2]
 %         param_ini=[50 max(tmp(:)) 1 1 1 max(tmp(:))/5 3]; %[offset amplitude x-shift y-shift width]; initial parameters for Gaussfit
 %         lb=[0 0 -length(x_vec)/2 -length(x_vec) 0 0 0]; %lower bounds for fit-parameters
@@ -340,7 +343,7 @@ PSF5D(isnan(PSF5D))=0;
 
 PSFpath='c:/users/q004aj/desktop/PSFs/';
 name=[PSFpath 'PSF5D_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree_os3.mat'];
-%save(name,'PSF5D','z_vec','ux','NA','RI','interp_incr','os'); 
+%save(name,'PSF5D','z_vec','ux','NA','RI','interp_incr','os','sigma'); 
 
     
 %% ---calculating CRBs----
@@ -377,19 +380,16 @@ metric2=mean(sqrt(CRBz));
 
 %% A) for ZENIKE OPTIMIZATION: calculating Zernikes; the Zernike table is stored in Z and used by the
 %sub-routine "fun_optPSFforSAF.m"
+tmp=[11,22,37,56,5,6,7,8]; %Zernike modes (Noll scheme) to be included in the optimization
+Z=ZernikeCalc(tmp,ones(length(tmp),1),pupil,'Noll');
+no_modes=size(Z,3); 
 
-% no_modes=10;
-% for m=1:no_modes;
-%     vec=zeros(1,20);
-%     vec(m+4)=1;
-%     Z(:,:,m)=zernike_modes(N,N,vec);
-% end
-% a=rand(1,10);
-% a2=zeros(1,1,length(a));
-% a2(1,1,:)=a;
-% phase=sum(repmat(a2,[size(Z,1),size(Z,2),1]).*Z,3); %pupil phase
-% imagesc(phase); title('initial pupil phase'); pause(0.01);
-% a_ini=zeros(no_modes,1); %initial vector of Zernikes, beginning with astigmatism (no. 5)
+a=rand(1,size(Z,3));
+a2=zeros(1,1,length(a));
+a2(1,1,:)=a;
+phase=sum(repmat(a2,[size(Z,1),size(Z,2),1]).*Z,3); %pupil phase
+imagesc(phase); title('initial pupil phase'); pause(0.01);
+a_ini=zeros(no_modes,1); %initial vector of Zernikes, beginning with astigmatism (no. 5)
 
 %% B) for stepped phase mask optimization
 %clear Z

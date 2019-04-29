@@ -6,13 +6,12 @@
 clear all; 
 close all; 
 
-%%
-no_images=100; %number of simulated CCD images (=length of stack)
-n_img=400;  %pixel size length of each simulated camera image
-rho=0.002; %average molecule density 1/µm^2
-sig=5e5; %signal per molecule in photons (refers to signal of brightest molecule)
-BG_top=1; %background level in photons in top image
-BG_bottom=0; %background level in photons in bottom image
+no_images=25; %number of simulated CCD images (=length of stack)
+n_img=350;  %pixel size length of each simulated camera image
+rho=0.02; %average molecule density 1/µm^2
+sig=1e6; %signal per molecule in the topimage in photons (refers to signal of brightest molecule)
+BG_top=00; %background level in photons in top image
+BG_bottom=00; %background level in photons in bottom image
 
 %camera parameters
 gain=1; 
@@ -24,7 +23,7 @@ r_sphere=2.0e-3/2; %radius of calibration sphere (Alexa-coated ball lens)
 %distortion of second image (NOTE: bottom image is also flipped-up/down in
 %addition to the settings below)
 theta=5;  %rotation angle in deg
-ratio=0.93; %ratio=energy_topimage/engergy_bottomimage: power ratio between the two imaging channels(representing nonideal beamsplitter)
+ratio=0.93; %ratio=energy_topimage/energy_bottomimage: power ratio between the two imaging channels(representing nonideal beamsplitter)
 
 
 %% loading "top-image" model (upper image on camera)
@@ -36,18 +35,18 @@ PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 
 %load 3D PSF:
 %load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
-load([PSFpath 'PSF_21x21_0-2-250nm_RI=1.45_dz=-400_aberrfree_os3.mat']);
+load([PSFpath 'PSF_15x15_0-2-250nm_RI=1.45_dz=0_aberrfree_os3.mat']);
 
-two_ch='n'; %flag, indicating that two channels are simulated
+two_ch='y'; %flag, indicating that two channels are simulated
 
-%if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
+if exist('PSF5D') %if 5D PSF is loaded 
+   [nx0,ny0,nz0,nxi,nyi]=size(PSF5D);
+   PSF_top=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
+else
     PSF_top=PSF_tot; 
     [nx0,ny0,nz0]=size(PSF_top); %size of model    
     disp('3D-PSF loaded');
-%elseif ndims(PSF5D)==5 
-%    [nx0,ny0,nz0,nxi,nyi]=size(PSF5D);
-%    PSF_top=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
-%end
+end
 
 E_top=trapz(trapz(PSF_top,1),2);
 clear PSF5D;
@@ -60,13 +59,15 @@ disp('done');
 
 two_ch='y'; %flag, indicating that two channels are simulated
 
-load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-500nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
+load([PSFpath 'PSF_15x15_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
 
-%if ndims(PSF5D)==3 %if "standard" 3D PSF is loaded 
+if exist('PSF5D'); %if "standard" 3D PSF is loaded 
+    PSF_bottom=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
+else
     PSF_bottom=PSF_tot;
-%elseif ndims(PSF5D)==5 
-%    PSF_bottom=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
-%end
+    disp('3D-PSF loaded');
+end
+
 E_bottom=trapz(trapz(PSF_bottom,1),2);
 
 clear PSF5D;
@@ -124,8 +125,7 @@ for mm=1:no_images
         end
         
     end
-    disp('done');
-
+   
     
     CCD_ideal_top=zeros(n_img*os,n_img*os);
     if strcmp(two_ch,'y')
@@ -133,7 +133,7 @@ for mm=1:no_images
     end
     
     for m=1:no_mols %moving molecules laterally
-        tmp=embed(I_top(:,:,m),os*[n_img,n_img],0); %embedding molecules image in empty CCD image
+        tmp=embed(I_top(:,:,m),os*[n_img,n_img],0); %placing molecule image in the centre of an empty CCD image
         
         %A)Fourier-based shifting
         %F_tmp=fftshift(fft2((tmp))); 
@@ -144,7 +144,7 @@ for mm=1:no_images
         CCD_ideal_top=CCD_ideal_top+interp2(X,Y,tmp,X-max(X(:))/2+x_mol(m),Y+max(Y(:))/2-y_mol(m),'linear',0);
                 
         if strcmp(two_ch,'y')
-            tmp2=embed(I_bottom(:,:,m),[n_img,n_img],0); %embedding molecules image in empty CCD image
+            tmp2=embed(I_bottom(:,:,m),os*[n_img,n_img],0); %embedding molecules image in empty CCD image
             
             %A)Fourier-based shifting
             %F2_tmp=fftshift(fft2((tmp2))); 
@@ -184,17 +184,17 @@ for mm=1:no_images
     end
     
 end
-
+disp('done');
 %% saving data
 
 filename=['sig-bg=' num2str(sig,4) '-' num2str(BG_top,3) '_gain=' num2str(gain)  '_rho=' num2str(rho)];
 for mm=1:no_images
     
-    imwrite(CCD_top(:,:,mm),['simu_os3_top_(tot)_' filename '.tif'],'WriteMode','Append');
+    imwrite(CCD_top(:,:,mm),['simu_top_' filename '.tif'],'WriteMode','Append');
     
     if strcmp(two_ch,'y')
-        imwrite(CCD_bottom(:,:,mm),['simu_bottom_(UAF)_' filename '.tif'],'WriteMode','Append');
+        imwrite(CCD_bottom(:,:,mm),['simu_bottom_' filename '.tif'],'WriteMode','Append');
     end
 end
-disp('done');
+disp('data saved');
 
