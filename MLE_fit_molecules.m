@@ -69,10 +69,11 @@ x_data(:,:,2)=Y; %coord. data in this form is required for Gaussfits which are u
 %% taking out an arbitraty x-y slice of the PSF-stack: this is our "measurement"
 
 photon_no=500000; %total photon number
+gain=1; 
 BG=0; %background level in photons
 
 %calculating CRLBs for single-channel imaging (all photons in one channel)
-[CRBx,CRBy,CRBz]=fun_CRB(PSF./repmat(sum(sum(PSF,1),2),[size(PSF,1) size(PSF,2) 1]),ux,uz,photon_no,BG);
+[CRBx,CRBy,CRBz]=fun_CRB(PSF./repmat(sum(sum(PSF,1),2),[size(PSF,1) size(PSF,2) 1]),ux,uz,photon_no,BG,gain);
 
 fun_estimate=@(v) v(5)+v(4)*interpn(PSF_norm,(fw+1:nx+fw)-v(1),(fw+1:ny+fw)'-v(2),v(3)); %calculates molecule image from estimated parameters x
 fun_estimate2=@(v) v(5)+v(4)*interpn(PSF2_norm,(fw+1:nx+fw)-v(1),(fw+1:ny+fw)'-v(2),v(3)); %calculates molecule image from estimated parameters x

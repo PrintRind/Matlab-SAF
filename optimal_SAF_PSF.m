@@ -21,7 +21,7 @@ n_photon=1000; %number of camera counts in the brightest dipole-image
 bg=00; %mean background-counts level
 
 N=64;
-lambda_0=670e-9;
+lambda_0=670e-9; %vacuum wavelength
 NA=1.67; RI=[1.45 1.45 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 %NA=1.40; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 d2=0e-9; %thickness of intermediate layer (layer 2)
@@ -97,7 +97,7 @@ clear I_BFP ratio I_BFP
 
 for m=1:length(z_vec) %BFP image number
 
-    %user-defined additional pupil mask (incorporates objective transmission profile):
+        %user-defined additional pupil mask (incorporates objective transmission profile):
         phase=(0)*pupil_UAF;
         mask=pupil.*sqrt(obj_transm).*exp(1i*phase+1i*aberr+1i*dz*Defocus);
 
@@ -195,7 +195,7 @@ for m=1:length(z_vec)
     I_yz=abs(czt2(Ey_Pz(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;
     PSF_UAF(:,:,m)=I_xx+I_yx+I_xy+I_yy+I_xz+I_yz;    
     
-    if strcmp(noise,'y'); %if noise is selected
+    if strcmp(noise,'y') %if noise is selected
         tmp=PSF_UAF(:,:,m)/C_norm*n_photon+bg; 
         PSF_UAF(:,:,m)=poissrnd(tmp,size(tmp,1),size(tmp,2)); %normalization of PSF   
     else
@@ -241,7 +241,7 @@ for m=1:length(z_vec)
         param_ini=[0 max(tmp(:)) 1 1 1]; %[offset amplitude x-shift y-shift width]; initial parameters for Gaussfit
         lb=[0 0 -length(x_vec)/2 -length(x_vec)/2 0.5]; %lower bounds for fit-parameters
         ub=[max(tmp(:)) max(tmp(:)) length(x_vec)/2 length(x_vec)/2 length(x_vec)/2]; %upper bounds
-        [Param,resnorm,residual,exitflag]=lsqcurvefit(@fun_gauss_and_offset_test,param_ini,x_data,tmp,lb,ub);
+        [Param,resnorm,residual,exitflag]=lsqcurvefit(@fun_gauss_and_offset,param_ini,x_data,tmp,lb,ub);
         Gaussfit=fun_gauss_and_offset(Param,x_data);
         Gfit_tot(m)=Param(2)*2*pi*Param(5)^2; %energy contained (see e.g. formula in Thunderstorm script)
         sigma(m)=Param(5);

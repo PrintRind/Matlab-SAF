@@ -42,7 +42,7 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
         param_ini=[BG00 max(I(:))-BG00 0 0 1]; %[offset amplitude x-shift y-shift width]; initial parameters for Gaussfit
         lb=[0 0.5*(max(I(:))-BG00) -nx/3 -nx/3 0.5]; %lower bounds for fit-parameters
         ub=[10*BG00 1.5*(max(I(:))-BG00) nx/3 nx/3 3]; %upper bounds
-        [Param,~,~,~]=lsqcurvefit(@fun_gauss_and_offset,param_ini,x_data,I,lb,ub);
+        [Param,~,~,~]=lsqcurvefit(@fun_gauss_and_offset_test,param_ini,x_data,I,lb,ub);
         %Gaussfit=fun_gauss_and_offset_test(Param,x_data);
         x0=Param(3); %in pixels (vertical direction in image I)
         y0=Param(4); %in pixels
@@ -52,7 +52,7 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
         if isscalar(z_ini_info) %info about initial z-estimate
             z_ini=z_ini_info;
         else  %if provided z_ini_info is not scalar, then is describes a z_ini versus Gaussian-width-curve which provides a good initial z-estiamte based on the Gaussian fit width
-            z_ini=interp1(z_ini_info,1:nz0,Param(5),'linear',nz0/2);
+            z_ini=interp1(z_ini_info,1:nz0,Param(5),'linear','extrap');
         end
         
             
@@ -89,8 +89,9 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
 
         est=[x_est y_est z_est N_est BG_est resnorm_MLE];
         
-        %disp('initial and final x-y-estimates:'); disp([x0,x_est,y0,y_est]);pause(0.1);
-        %disp(resnorm/N_est);
+%         disp('initial and final x-y-z-estimates:'); disp([x0,x_est,y0,y_est,z_ini-1,z_est]);
+%         pause; 
+%         %disp(resnorm/N_est);
           
         %discarding erroneous localizations
         if (resnorm_MLE>resnorm_thresh) || (abs(x_est)>0.98) || (abs(y_est)>0.98) %if fitting error too large --> discard
@@ -102,8 +103,8 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
             
         else
             if showimage
-                %imagesc(I); axis equal; axis tight; title(['sig./ bg =' num2str(N_est) ' / ' num2str(BG_est)]); 
-                %pause(0);
+                imagesc(I); axis equal; axis tight; title(['sig./ bg =' num2str(N_est) ' / ' num2str(BG_est)]); 
+                pause(0);
             end
         end
         

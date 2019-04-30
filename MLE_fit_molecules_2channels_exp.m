@@ -208,7 +208,7 @@ TS_t=TS_filt; %initializing Thunderstorm coordinates for transformed (second) im
 % -------------------------------------------------
 
 %<<<<<<<fine-adjust centering of bottom image by varying offset-values
-offset=[0 0]*ux*1e9; %visually determined offset for crop-coordinates
+offset=[-1 0]*ux*1e9; %visually determined offset for crop-coordinates
 TS_t(:,3:4)=[xT,yT]*(ux*1e9)-repmat(offset,size(TS_filt,1),1);
 
 % %check transform by plotting overlaid points
@@ -263,16 +263,24 @@ idx_disc=[];
 m=0;
 for mm=1:size(TS_filt,1)
 
-    if mod(mm,20)==0 %show image every 20th frame
+    if mod(mm,10)==0 %show image every 20th frame
         showimage=1; 
     else
         showimage=1;
     end
     z_ini=[z_ini_info1; z_ini_info2];
     %z_ini=60;
-    est=fun_MLE_2channels(I_top(:,:,mm), I_bottom(:,:,mm), PSF_top_norm, PSF_bottom_norm, interp_incr,x_data,z_ini,qual_thresh,ratio,showimage);
-    %est=[x1,y1,x2,y2,z,Sig,BG1,BG2,resnorm1,resnorm2]
-
+    
+    %---dual-channel evaluation----
+    %est=fun_MLE_2channels(I_top(:,:,mm), I_bottom(:,:,mm), PSF_top_norm, PSF_bottom_norm, interp_incr,x_data,z_ini,qual_thresh,ratio,showimage);
+    %format: est=[x1,y1,x2,y2,z,Sig,BG1,BG2,resnorm1,resnorm2]
+    
+    %----single-channel eval-----------
+    tmp=fun_MLE(I_bottom(:,:,mm),PSF_bottom_norm,interp_incr,x_data,z_ini_info2,qual_thresh,showimage);
+    if isempty(tmp)==0
+        est=[0 0 tmp(1:4) 0 tmp(5) 0 tmp(6)];
+    end
+    
     if isempty(est) %if resnorm is too large, function returns est=[]
         idx_disc=[idx_disc mm]; %indidces of images to be discarded
     else
@@ -299,7 +307,7 @@ locdata_TS=[x1_est' y1_est' z_est' N_est' BG1_est' BG2_est' resnorm_MLE' loc_no'
 locdata_TS(isnan(locdata_TS))=0;
 
 disp('all data localized');
-
+       
 %% saving localization results
 
 NameSave='biplane_alexa_sphere_2019-03-26';
@@ -308,17 +316,17 @@ save(['LOCDATA_' NameSave '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z_ve
 %% -----data eval----- 
 
 finaldata=locdata_TS; 
-I_sel=I_top; %selected images
+I_sel=I_bottom; %selected images
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=25e-6; %cutoff distance from sphere center in m
+    r_cutoff=20e-6; %cutoff distance from sphere center in m
 %manually defining sphere center
     if exist('data_top')
         xc=[1 1]*size(data_top,1)*ux*1e9/2; %center of image (in nm)
     else
         xc=[1 1]*(max(finaldata(:,1))-min(finaldata(:,1)))/2; %center of image (in nm)
     end
-    findcenter='y'; %automatic center-finding? set to 'y' or 'n'
+    findcenter='n'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
     no_c=0; %central local. no.
     no_delta=inf;  %half width, set inf to get all data

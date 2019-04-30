@@ -1,7 +1,7 @@
 %Data generator for "MLE_fit_molecules.m" and
 %"MLE_fit_molecules_2channels.m"
 
-%simulated "raw data" (i.e. molecule images) are generated from one (or two) PSF-model(s) 
+%simulated "raw data" (i.e. molecule images) for the real sphere-sample are generated from one (or two) PSF-model(s) 
 
 clear all; 
 close all; 
@@ -25,17 +25,21 @@ r_sphere=2.0e-3/2; %radius of calibration sphere (Alexa-coated ball lens)
 theta=5;  %rotation angle in deg
 ratio=0.93; %ratio=energy_topimage/energy_bottomimage: power ratio between the two imaging channels(representing nonideal beamsplitter)
 
-
-%% loading "top-image" model (upper image on camera)
-
 %PSF-path
 PSFpath='C:\Users\q004aj\Desktop\PSFs\';
+%PSF for top image stack: 
+name_PSF_top='PSF5D_13x13_0-2-250nm_RI=1.45_dz=0_aberrfree_os3.mat';
+%PSF for bottom image stack: 
+name_PSF_bottom='PSF5D_13x13_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat';
+
+
+%% loading "top-image" model (upper image on camera)
 
 %load('./PSFs/PSF5D_tot(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat'); %loading 3D or 5D PSF-model
 
 %load 3D PSF:
 %load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
-load([PSFpath 'PSF_15x15_0-2-250nm_RI=1.45_dz=0_aberrfree_os3.mat']);
+load([PSFpath name_PSF_top]);
 
 two_ch='y'; %flag, indicating that two channels are simulated
 
@@ -59,7 +63,7 @@ disp('done');
 
 two_ch='y'; %flag, indicating that two channels are simulated
 
-load([PSFpath 'PSF_15x15_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
+load([PSFpath name_PSF_bottom]); %loading 3D or 5D PSF-model
 
 if exist('PSF5D'); %if "standard" 3D PSF is loaded 
     PSF_bottom=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
