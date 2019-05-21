@@ -5,13 +5,14 @@ clear all;
 %% user parameters 
 
 %camera parameters
-gain=1;  %set gain to 1 if gain is switched off
-amp=9.8; %9.9; %electrons per count 
+gain=50;  %set gain to 1 if gain is switched off
+amp=9.8; %9.8; %electrons per count 
 QE=0.95; %quantum efficiency
+baseline=100; %offset level in ADUs; should be 100 for Andor ixon cams
 ux=117e-9; %effective camera pixel size
 r_sphere=2.0e-3/2; %radius of sphere
 
-sample='sphere'; %type of sample, e.g. 'sphere', 'cos7', etc.
+sample='cos7'; %type of sample, e.g. 'sphere', 'cos7', etc.
 qual_thresh=inf; %quality thrshold for MLE-fits (bad fits are discarded from the data); %the smaller the value the stricter is the selection.
 
 
@@ -21,9 +22,10 @@ PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 
 %3D PSFs:
 %load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
-
 %5D PSFs: (faster)
-load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+
+%load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
+load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.33_dz=-500_aberr_2019-01-30_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 %load([PSFpath 'PSF5D_fine_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
 %load([PSFpath 'PSF5D_13x13_0-0.5-10nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; 
 %load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.45_dz=-600_aberr-2019-01-30_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
@@ -80,14 +82,15 @@ BGmask=zeros(nx,ny);
 BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
-use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
+
+use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data
 [Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
     image_no=length(imfinfo([Path Name]));
     progressbar;
     for m=1:image_no
-       data(:,:,m)=double(imread([Path Name],m));
+       data(:,:,m)=double(imread([Path Name],m))-baseline;
        progressbar(m/image_no);
     end
     
@@ -116,6 +119,9 @@ else
     disp('done; no BG subtracted!');
 end
 
+%save('exp_data.mat','data_corr','data_BG');
+
+
 %% optional: saving EVER-corrected stack, e.g. to be used with thunderstorm
 % 
 if strcmp(use_EVER,'y')
@@ -124,6 +130,9 @@ if strcmp(use_EVER,'y')
     end
 end
 disp('done');
+
+
+
 
 %%
 imagesc(data_corr(:,:,5));
@@ -194,8 +203,8 @@ imagesc(data_corr(:,:,5));
 %% METHOD B: using thunderstorm coordinates
 % (works for 3D and 5D PSF models)
 
-tmp= csvread('TS_bottom.csv',1,0);
-%TS=tmp(1:5000,:);%select parts of the entire data
+tmp=csvread('TS.csv',1,0);
+%TS=tmp(1:50000,:);%select parts of the entire data
 TS=tmp;
 
 if size(TS,2)<10 %adding extra columns if TS-matrix has too few
@@ -203,7 +212,7 @@ if size(TS,2)<10 %adding extra columns if TS-matrix has too few
 end
         
 %data pre-filtering options
-thresh_dist=2000; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
+thresh_dist=1400; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
 thresh_sigma=1*max(TS(:,5)); %sigma of Gaussian fit in nm
 thresh_uncert=1*max(TS(:,10)); %
 TS_filt = RmNN(TS(end,2),TS,thresh_dist,thresh_sigma,thresh_uncert); %picking only those molecule images with no neighbours in the vicinity
@@ -238,7 +247,8 @@ for mm=1:loc_no_tot
     else
         showimage=0;
     end
-        
+    
+    z_ini_info=80;
     est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini_info,qual_thresh,showimage);
     %est=fun_MLE_fast(I(:,:,mm),PSF_norm,interp_incr,z_ini,qual_thresh,[relpos(mm,:) TS(mm,6:7)/amp],showimage)
     
@@ -281,7 +291,7 @@ z_drift=0;
 
 %% saving localization results
 
-save(['LOCDATA_full_aberrfree_13x13PSF_dz-500nm_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
+save(['LOCDATA_full_aberrfree_13x13PSF_dz-450nm_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
 
 %% -- data eval, method B (thunderstorm)
 
@@ -290,6 +300,7 @@ finaldata=locdata_TS;
 I_sel=I; %selected images
 
 % %DRIFT CORRECTION - interpolating frame-dependent drift values from the Thunderstorm-curves
+
 if exist('drift')
     drift_x=interp1(drift(2:end,1),drift(2:end,2),finaldata(:,8));
     drift_y=interp1(drift(2:end,3),drift(2:end,4),finaldata(:,8));
@@ -306,10 +317,10 @@ end
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=12e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
+    r_cutoff=25e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
 %manually defining sphere center
-    %xc=[14.18 15.51]*1e3; %[x,y]
-    xc=[1 1]*size(data,1)/2*ux*1e9; %center of image (for simus)
+    xc=[13 15]*1e3; %[x,y]
+    %xc=[1 1]*size(data,1)/2*ux*1e9; %center of image (for simus)
     findcenter='y'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
     no_c=0; %central local. no.
@@ -318,7 +329,7 @@ end
     phi_c=0; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=inf;  %the lower the cutoff, the more strict the selection
+    qual_thresh=15;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=0;
     photon_hiBND=inf;
@@ -329,15 +340,15 @@ idx=find(finaldata(:,4)==0);
 finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
-% %delete entries that run into upper z-boundaries
-% idx=finaldata(:,3)>=max(z)*1e9;
-% finaldata(idx,:)=[]; 
-% I_sel(:,:,idx)=[]; 
-% 
-% %delete entries that run into lower z-boundaries
-% idx=finaldata(:,3)<=min(z)*1e9+1;
-% finaldata(idx,:)=[]; 
-% I_sel(:,:,idx)=[]; 
+%delete entries that run into upper z-boundaries
+idx=finaldata(:,3)>=0.9*max(z)*1e9;
+finaldata(idx,:)=[]; 
+I_sel(:,:,idx)=[]; 
+
+%delete entries that run into lower z-boundaries
+idx=finaldata(:,3)<=min(z)*1e9+1;
+finaldata(idx,:)=[]; 
+I_sel(:,:,idx)=[]; 
 
 %selecting temporal sections
 idx=abs(finaldata(:,7)-no_c)>no_delta;
@@ -387,7 +398,7 @@ if exist('PSF')
         PSF3D=PSF; 
     end
     
-    [CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg,gain);
+    [CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg,gain,0);
     disp('------------------');
     disp('Cramer-Rao bounds:');
     disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
@@ -496,8 +507,8 @@ hold off;
 %----3D scatterplot: show all filtered data----
 figure(1); 
 %plot3(locdata_TS(:,1)/1e3,locdata_TS(:,2)/1e3,locdata_TS(:,3),'o'); grid on;
-markersize=2; %(locdata_TS(:,4)+1)/1e3;
-markercolor=filtdata(:,8); 
+markersize=1; %(locdata_TS(:,4)+1)/1e3;
+markercolor=filtdata(:,3); %(:,8)
 scatter3(filtdata(:,1)/1e3,filtdata(:,2)/1e3,filtdata(:,3),markersize,markercolor); grid on;
 colormap jet; 
 colorbar; 
@@ -533,7 +544,7 @@ ylabel('number of localizations');
 
 % ----2D scatterplot with color-coded z-value----
 figure(6); 
-markersize=1;
+markersize=0.2;
 markercolor=filtdata(:,3);% markercolor=uint8(markercolor);
 scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,markersize,markercolor);
 xlabel('x / µm');
@@ -575,11 +586,11 @@ title(['z=' num2str(filtdata(selected_loc_no,3),4)]);
 %% plotting only "heroes", i.e. molecules that are "on" for serveral consecutive frames
 
 %clear hero
-minlength=8; %minimum frame-no a hero is on
+minlength=5; %minimum frame-no a hero is on
 bridgelength=0; %length of allowed "dark" frames in between on-frames
 binsize=50; %side length of spatial bins in nm
   
-batchsize=10e3; 
+batchsize=20e3; 
 hero=[];
 for mm=1:floor(length(filtdata)/batchsize) %for long data sets: evaluating in batches 
     
@@ -613,7 +624,7 @@ end
     %calculating CRLBs for heroes
     mean_signal_heroes=mean(hero_means(:,4));
     mean_bg_heroes=mean(hero_means(:,5));
-    [CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes,gain);
+    [CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D,ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes,gain,0);
     CRBz_h_extrapol=interp1(z_vec,[CRBz_h CRBz_h(end)],z_theory); 
 
 %% --- plotting z-mean vs. z-sigmas
@@ -654,19 +665,29 @@ else
     %color=hero_means(:,8);%-min(hero_means(:,8));
     color=hero_lengths; 
     %----scatterplot----
-    %scatter(hero_means(:,3),hero_sigmas_normed,[],color,'.');
-    %ylim([0 30]); xlim([0 220]);
+    scatter(hero_means(:,3),hero_sigmas_normed,[],color,'.');
+    ylim([0 30]); xlim([0 220]);
     %----with x-errorbars---
-    errorbar(hero_means(:,3),hero_sigmas_normed,hero_sigmas(:,3)./sqrt(hero_lengths),'horizontal','.'); 
-    ylim([0 30]); xlim([0 210]);
-    
+%     errorbar(hero_means(:,3),hero_sigmas_normed,hero_sigmas(:,3)./sqrt(hero_lengths),'horizontal','.'); 
+%     ylim([0 50]); xlim([0 200]);
+%     
     xlabel('mean z-value / nm');
     ylabel('\sigma_z / nm'); grid on;
     title(['normalized \sigma_z of heroes, binsze=' num2str(binsize) ' nm, minleng.=' num2str(minlength) '; bridgeleng.=' num2str(bridgelength)]);
     hold on; 
     plot(linspace(0,250,length(CRBz_h)),sqrt(CRBz_h)+0,'--');
     hold off; 
-    colormap jet; colorbar;  
+    colormap jet; colorbar;
+    
+    
+    %plotting x-y-sigmas
+    figure(13);
+    plot(hero_means(:,3),hero_sigmas(:,2),'.'); 
+    hold on; 
+    plot(hero_means(:,3),hero_sigmas(:,1),'.'); 
+    plot(linspace(0,250,length(CRBx_h)),sqrt(CRBx_h)+0,'--');
+    hold off; 
+    ylabel('\sigma_{x,y}');
     
 end
 
@@ -764,7 +785,7 @@ for m=1:length(px)
     
     figure(9);
     markersize=2;
-    markercolor=filtdata(idx,8);% markercolor=uint8(markercolor);
+    markercolor=filtdata(idx,3);% markercolor=uint8(markercolor);
 
     scatter3(filtdata(idx,1)/1e3,filtdata(idx,2)/1e3,filtdata(idx,3),markersize,markercolor);
     xlabel('x / µm');

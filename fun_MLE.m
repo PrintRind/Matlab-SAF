@@ -52,7 +52,8 @@ BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
         if isscalar(z_ini_info) %info about initial z-estimate
             z_ini=z_ini_info;
         else  %if provided z_ini_info is not scalar, then is describes a z_ini versus Gaussian-width-curve which provides a good initial z-estiamte based on the Gaussian fit width
-            z_ini=interp1(z_ini_info,1:nz0,Param(5),'linear','extrap');
+            z_ini=max(min(interp1(z_ini_info,1:nz0,Param(5),'linear','extrap'),3*nz0/4),1);
+            %z_ini=60; 
         end
         
             

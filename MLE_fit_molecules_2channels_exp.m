@@ -15,11 +15,13 @@ pxSize=117;
 dist_max=400;
 
 %camera parameters
-gain=1; 
+gain=100; 
 amp=9.9; %electrons per count 
 QE=0.95; %quantum efficiency
+baseline=100; %offset level in ADUs; should be 100 for Andor ixon cams
+
 r_sphere=2.0e-3/2; %radius of sphere
-ratio=0.93; %1/1.2; %fixed energy-ratio between both images ratio=energy_topimage/energy_bottomimage
+ratio=1/1.4; %fixed energy-ratio between both images ratio=energy_topimage/energy_bottomimage
 
 PSFpath='C:\Users\q004aj\Desktop\PSFs\';
 
@@ -123,8 +125,8 @@ clear data_top data_bottom
     image_no=length(imfinfo([Path Name{1}]));
     for m=1:image_no
       disp(image_no-m);
-      data_bottom(:,:,m)=flipud(double(imread([Path Name{1}],m))); %data is instantly flipped to compensate for flip on camera
-      data_top(:,:,m)=(double(imread([Path Name{2}],m))); %weighting image energy with "ratio"
+      data_bottom(:,:,m)=flipud(double(imread([Path Name{1}],m)))-baseline; %data is instantly flipped to compensate for flip on camera
+      data_top(:,:,m)=(double(imread([Path Name{2}],m)))-baseline; %weighting image energy with "ratio"
     end
 disp('done');
 
@@ -176,8 +178,8 @@ end
 %-> check if molecule images are accurately cropped from the image stacks
 
 tmp= csvread('TS_top.csv',1,0);
-%TS=tmp(1:5000,:);%select parts of the entire data
-TS=tmp; 
+TS=tmp(1:5000,:);%select parts of the entire data
+%TS=tmp; 
 
 %----data pre-filtering options
 thresh_dist=2000; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
@@ -208,7 +210,7 @@ TS_t=TS_filt; %initializing Thunderstorm coordinates for transformed (second) im
 % -------------------------------------------------
 
 %<<<<<<<fine-adjust centering of bottom image by varying offset-values
-offset=[-1 0]*ux*1e9; %visually determined offset for crop-coordinates
+offset=[0 0]*ux*1e9; %visually determined offset for crop-coordinates
 TS_t(:,3:4)=[xT,yT]*(ux*1e9)-repmat(offset,size(TS_filt,1),1);
 
 % %check transform by plotting overlaid points
@@ -263,7 +265,7 @@ idx_disc=[];
 m=0;
 for mm=1:size(TS_filt,1)
 
-    if mod(mm,10)==0 %show image every 20th frame
+    if mod(mm,10)==0 %show image every 20th frame or so
         showimage=1; 
     else
         showimage=1;
@@ -272,14 +274,14 @@ for mm=1:size(TS_filt,1)
     %z_ini=60;
     
     %---dual-channel evaluation----
-    %est=fun_MLE_2channels(I_top(:,:,mm), I_bottom(:,:,mm), PSF_top_norm, PSF_bottom_norm, interp_incr,x_data,z_ini,qual_thresh,ratio,showimage);
+    est=fun_MLE_2channels(I_top(:,:,mm), I_bottom(:,:,mm), PSF_top_norm, PSF_bottom_norm, interp_incr,x_data,z_ini,qual_thresh,ratio,showimage);
     %format: est=[x1,y1,x2,y2,z,Sig,BG1,BG2,resnorm1,resnorm2]
     
     %----single-channel eval-----------
-    tmp=fun_MLE(I_bottom(:,:,mm),PSF_bottom_norm,interp_incr,x_data,z_ini_info2,qual_thresh,showimage);
-    if isempty(tmp)==0
-        est=[0 0 tmp(1:4) 0 tmp(5) 0 tmp(6)];
-    end
+    %tmp=fun_MLE(I_bottom(:,:,mm),PSF_bottom_norm,interp_incr,x_data,z_ini_info2,qual_thresh,showimage);
+    %if isempty(tmp)==0
+    %   est=[0 0 tmp(1:4) 0 tmp(5) 0 tmp(6)];
+    %end
     
     if isempty(est) %if resnorm is too large, function returns est=[]
         idx_disc=[idx_disc mm]; %indidces of images to be discarded
@@ -319,22 +321,22 @@ finaldata=locdata_TS;
 I_sel=I_bottom; %selected images
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=20e-6; %cutoff distance from sphere center in m
+    r_cutoff=15e-6; %cutoff distance from sphere center in m
 %manually defining sphere center
     if exist('data_top')
         xc=[1 1]*size(data_top,1)*ux*1e9/2; %center of image (in nm)
     else
         xc=[1 1]*(max(finaldata(:,1))-min(finaldata(:,1)))/2; %center of image (in nm)
     end
-    findcenter='n'; %automatic center-finding? set to 'y' or 'n'
+    findcenter='y'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
-    no_c=0; %central local. no.
-    no_delta=inf;  %half width, set inf to get all data
+    no_c=1000*2; %central local. no.
+    no_delta=1000;  %half width, set inf to get all data
 %selecting a defined azimuthal section of the sphere 
     phi_c=200; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=inf;  %the lower the cutoff, the more strict the selection
+    qual_thresh=15;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=0;
     photon_hiBND=inf;
@@ -387,7 +389,6 @@ finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
 filtdata=finaldata;
-
 
 %---automatically finding optimal sphere-center: 
 r_coord=linspace(0,30,size(PSF_top,3))*1e-6; %radial coord. in m
@@ -471,7 +472,7 @@ plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
 hold on; 
 plot(r_coord*1e6,z_theory*1e9+[0 sqrt(CRBz)],'r.');
 plot(r_coord*1e6,z_theory*1e9-[0 sqrt(CRBz)],'r.');
-scatter(r_mol*1e6,filtdata(:,3),3,markercolor); grid on; colorbar; 
+scatter(r_mol*1e6,filtdata(:,3),1,markercolor); grid on; colorbar; 
 xlabel('radial coord / µm');
 ylabel('z /  nm');
 title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual-thresh=' num2str(qual_thresh)]);
