@@ -30,7 +30,7 @@ function TS_sorted = RmNN(NrIMG,TS_,Treshold,Sigma,Uncertainty)
         clear Select TS_new
         Select = find(TS(:,2)==j);
         TS_new=TS(Select,:);
-       if not(isempty(TS_new));
+       if not(isempty(TS_new))
         clear Select
 
         % runs through all localisations
@@ -74,7 +74,7 @@ function TS_sorted = RmNN(NrIMG,TS_,Treshold,Sigma,Uncertainty)
        end
     end
 
-    [before ~]=size(TS);
-    [after ~]=size(TS_sorted);
+    [before, ~]=size(TS);
+    [after, ~]=size(TS_sorted);
     
     disp(sprintf('%1.f%% of the data sorted out',100-100*after/before))

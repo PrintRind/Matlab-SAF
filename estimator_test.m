@@ -6,7 +6,7 @@ close all;
 
 %% user parameters
 
-two_ch='n'; %two imaging channels?
+two_ch='y'; %two imaging channels?
 
 sig=2e3; %signal per molecule in the topimage in photons (refers to signal of brightest molecule)
 BG1=100; %background level in photons in top image
@@ -25,11 +25,11 @@ else
 end
 
 %PSF-path
-PSFpath='C:\Users\q004aj\Desktop\PSFs\';
+PSFpath='C:\Users\q004aj\Desktop\PSFs\NA1,7\';
 %PSF for top image stack: 
-name_PSF_top='PSF5D_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat';
+name_PSF_top='PSF5D_NA1.67_13x13_0-2-250nm_RI=1.33_dz=0_aberrfree_os3.mat';
 %PSF for bottom image stack: 
-name_PSF_bottom='PSF5D_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat';
+name_PSF_bottom='PSF5D_UAF_NA1.67_13x13_0-2-250nm_RI=1.33_dz=0_aberrfree_os3.mat';
 
 disp('done');
 
@@ -81,23 +81,23 @@ x_data(:,:,2)=Y; %coord. data in this form is required for Gaussfits which are u
 if strcmp(two_ch,'y') %flag, indicating that two channels are simulated
 
     %CRB of first channel: 
-    [CRBx_1,CRBy_1,CRBz_1,CRBsig_1,CRBbg_1,FI1]=fun_CRB(PSF1_s,ux0,uz,sig1,BG1,gain,0);
+    [CRBx_1,CRBy_1,CRBz_1,CRBsig_1,CRBbg_1,FI1]=fun_CRB(PSF1_s,ux0,uz,sig1,BG1/2,gain,0);
     %CRB of second channel: 
-    [CRBx_2,CRBy_2,CRBz_2,CRBsig_2,CRBbg_2,FI2]=fun_CRB(PSF2_s,ux0,uz,sig2,BG2,gain,0);
+    [CRBx_2,CRBy_2,CRBz_2,CRBsig_2,CRBbg_2,FI2]=fun_CRB(PSF2_s,ux0,uz,sig2,BG2/2,gain,0);
 
     %joint CRB for both channels: 
-    [CRBx,CRBy,CRBz,CRBsig,CRBbg,FI]=fun_CRB(PSF_tot,ux0,uz,sig1+sig2,(BG1+BG2)/2,gain,0);
+    %[CRBx,CRBy,CRBz,CRBsig,CRBbg,FI]=fun_CRB(PSF_tot,ux0,uz,sig1+sig2,(BG1+BG2)/2,gain,0);
     
     %alternatively, adding the Fisher-information of both channels, then calculate the joint CRB: 
     %(this seems to provide a worse match to the simulated precisions)
     FI_test=FI1+FI2; 
     for mm=1:nz0-1
         FI_inv=inv(FI_test(:,:,mm));
-        CRBx_test(mm)=FI_inv(1,1);
-        CRBy_test(mm)=FI_inv(2,2);
-        CRBz_test(mm)=FI_inv(3,3);
-        CRBsig_test(mm)=FI_inv(4,4);
-        CRBbg_test(mm)=FI_inv(5,5);
+        CRBx(mm)=FI_inv(1,1);
+        CRBy(mm)=FI_inv(2,2);
+        CRBz(mm)=FI_inv(3,3);
+        CRBsig(mm)=FI_inv(4,4);
+        CRBbg(mm)=FI_inv(5,5);
     end
 else
     [CRBx,CRBy,CRBz,CRBsig,CRBbg,FI]=fun_CRB(PSF1_s,ux0,uz,sig1,BG1,gain,0);
@@ -116,7 +116,7 @@ end
 
 % plot(sqrt(CRBx_test),'r--'); hold on; 
 % plot(sqrt(CRBy_test),'r--'); 
-% plot(sqrt(CRBz_test),'r');
+%plot(sqrt(CRBz_test),'r'); hold on; 
 %plot(sqrt(CRBsig_test),'r');
 %plot(sqrt(CRBbg_test),'r');
 
@@ -125,18 +125,20 @@ plot(sqrt(CRBy),'cy--');
 plot(sqrt(CRBz),'cy');
 %plot(sqrt(CRBsig),'cy');
 %plot(sqrt(CRBbg),'cy');
-
+ylabel('\sigma /nm'); 
+xlabel('z'); 
 hold off; 
 
 disp('done');
 
 %% creating test_images with defined signal and background-levels
 
-no_zsteps=1; 
+no_zsteps=10; 
 no_avg=50; %no of images per z-step
 no_images=no_zsteps*no_avg; 
 %---------------
-z_vals=80;%2:10:100; 
+z_vals=2:10:100; 
+%z_vals=80; 
 x_vals=zeros(length(z_vals));
 y_vals=x_vals; 
 
@@ -177,52 +179,53 @@ for m=1:no_images
     if strcmp(two_ch,'y') %flag, indicating that two channels are simulated
         
         %----VARIANT A: JOINT TWO-CHANNEL ESTIMATION---------
-        ratio=1; %brightness ratio between images of both channels
-        tmp=fun_MLE_2channels(I1(:,:,m),I2(:,:,m),PSF1,PSF2,interp_incr,x_data,[z_ini_info1; z_ini_info2],resnorm_thresh,ratio,showimage);
-        if isempty(tmp)
-            est(m,:)=0;
-        else
-            est(m,:)=tmp; 
-        end
-        %format: est=[x1_est y1_est x2_est y2_est z_est N_est BG1_est BG2_est resnorm1 resnorm2];
-        x1_est(m)=est(m,1)*ux0*1e9; 
-        y1_est(m)=est(m,2)*ux0*1e9;
-        x2_est(m)=est(m,3)*ux0*1e9; 
-        y2_est(m)=est(m,4)*ux0*1e9;
-        z_est(m)=est(m,5)*uz*1e9; 
-        N_est(m)=est(m,6)/gain*amp/QE;
-        BG1_est(m)=est(m,7)/gain*amp/QE;
-        BG2_est(m)=est(m,8)/gain*amp/QE;
-
-        %combine x-y estimates of both channels to a single, joint estimate of higher precision: 
-        idx=max(min(round(est(m,5)),nz0-1),0); 
-        x_est(m)=(x1_est(m)/CRBx_1(idx)+x2_est(m)/CRBx_2(idx))/(1/CRBx_1(idx)+1/CRBx_2(idx));
-        y_est(m)=(y1_est(m)/CRBy_1(idx)+y2_est(m)/CRBy_2(idx))/(1/CRBy_1(idx)+1/CRBy_2(idx));
+%         ratio=1; %brightness ratio between images of both channels
+%         %definition of outputs: est=[x1_est y1_est x2_est y2_est z_est N_est BG1_est BG2_est resnorm1 resnorm2];
+%         tmp=fun_MLE_2channels(I1(:,:,m),I2(:,:,m),PSF1,PSF2,interp_incr,x_data,[z_ini_info1; z_ini_info2],resnorm_thresh,ratio,showimage);
+%         if isempty(tmp)
+%             est(m,:)=0;
+%         else
+%             est(m,:)=tmp; 
+%         end
+%         %format: est=[x1_est y1_est x2_est y2_est z_est N_est BG1_est BG2_est resnorm1 resnorm2];
+%         x1_est(m)=est(m,1)*ux0*1e9; 
+%         y1_est(m)=est(m,2)*ux0*1e9;
+%         x2_est(m)=est(m,3)*ux0*1e9; 
+%         y2_est(m)=est(m,4)*ux0*1e9;
+%         z_est(m)=est(m,5)*uz*1e9; 
+%         N_est(m)=est(m,6)/gain*amp/QE;
+%         BG1_est(m)=est(m,7)/gain*amp/QE;
+%         BG2_est(m)=est(m,8)/gain*amp/QE;
+% 
+%         %combine x-y estimates of both channels to a single, joint estimate of higher precision: 
+%         idx=max(min(round(est(m,5))+1,nz0-1),0); 
+%         x_est(m)=(x1_est(m)/CRBx_1(idx)+x2_est(m)/CRBx_2(idx))/(1/CRBx_1(idx)+1/CRBx_2(idx));
+%         y_est(m)=(y1_est(m)/CRBy_1(idx)+y2_est(m)/CRBy_2(idx))/(1/CRBy_1(idx)+1/CRBy_2(idx));
 
         
         %----VARIANT B: COMBINING TWO SINGLE-CHANNEL ESTIMATES----------
         
-%         est1(m,:)=fun_MLE(I1(:,:,m),PSF1,interp_incr,x_data,z_ini_info1,resnorm_thresh,showimage);
-%         x1_est(m)=est1(m,1)*ux0*1e9; 
-%         y1_est(m)=est1(m,2)*ux0*1e9; 
-%         z1_est(m)=est1(m,3)*uz*1e9; 
-%         N1_est(m)=est1(m,4)/gain*amp/QE;
-%         BG1_est(m)=est1(m,5)/gain*amp/QE;
-% 
-%         est2(m,:)=fun_MLE(I2(:,:,m),PSF2,interp_incr,x_data,z_ini_info2,resnorm_thresh,showimage);
-%         x2_est(m)=est2(m,1)*ux0*1e9; 
-%         y2_est(m)=est2(m,2)*ux0*1e9; 
-%         z2_est(m)=est2(m,3)*uz*1e9; 
-%         N2_est(m)=est2(m,4)/gain*amp/QE;
-%         BG2_est(m)=est2(m,5)/gain*amp/QE;
-%         
-%         %combine estimates of both channels to a single, joint estimate of higher precision: 
-%         idx=z_pos(1); %we use for now the ground truth
-%         
-%         x_est(m)=(x1_est(m)/CRBx_1(idx)+x2_est(m)/CRBx_2(idx))/(1/CRBx_1(idx)+1/CRBx_2(idx));
-%         y_est(m)=(y1_est(m)/CRBy_1(idx)+y2_est(m)/CRBy_2(idx))/(1/CRBy_1(idx)+1/CRBy_2(idx));       
-%         z_est(m)=(z1_est(m)/CRBz_1(idx)+z2_est(m)/CRBz_2(idx))/(1/CRBz_1(idx)+1/CRBz_2(idx));
-%         N_est(m)=(1+1/ratio)*(N1_est(m)/CRBsig_1(idx)+N2_est(m)/CRBsig_2(idx))/(1/CRBsig_1(idx)+1/CRBsig_2(idx));
+        est1(m,:)=fun_MLE(I1(:,:,m),PSF1,interp_incr,x_data,z_ini_info1,resnorm_thresh,showimage);
+        x1_est(m)=est1(m,1)*ux0*1e9; 
+        y1_est(m)=est1(m,2)*ux0*1e9; 
+        z1_est(m)=est1(m,3)*uz*1e9; 
+        N1_est(m)=est1(m,4)/gain*amp/QE;
+        BG1_est(m)=est1(m,5)/gain*amp/QE;
+
+        est2(m,:)=fun_MLE(I2(:,:,m),PSF2,interp_incr,x_data,z_ini_info2,resnorm_thresh,showimage);
+        x2_est(m)=est2(m,1)*ux0*1e9; 
+        y2_est(m)=est2(m,2)*ux0*1e9; 
+        z2_est(m)=est2(m,3)*uz*1e9; 
+        N2_est(m)=est2(m,4)/gain*amp/QE;
+        BG2_est(m)=est2(m,5)/gain*amp/QE;
+        
+        %combine estimates of both channels to a single, joint estimate of higher precision: 
+        idx=z_pos(1); %we use for now the ground truth
+        
+        x_est(m)=(x1_est(m)/CRBx_1(idx)+x2_est(m)/CRBx_2(idx))/(1/CRBx_1(idx)+1/CRBx_2(idx));
+        y_est(m)=(y1_est(m)/CRBy_1(idx)+y2_est(m)/CRBy_2(idx))/(1/CRBy_1(idx)+1/CRBy_2(idx));       
+        z_est(m)=(z1_est(m)/CRBz_1(idx)+z2_est(m)/CRBz_2(idx))/(1/CRBz_1(idx)+1/CRBz_2(idx));
+        N_est(m)=(1+1/ratio)*(N1_est(m)/CRBsig_1(idx)+N2_est(m)/CRBsig_2(idx))/(1/CRBsig_1(idx)+1/CRBsig_2(idx));
                 
     else
        
@@ -294,4 +297,7 @@ title(['\sigma_N=' num2str(std(N_est),3) ', CRBsig=' num2str(sqrt(CRBsig(z_pos(1
         title(['\sigma_{BG2}=' num2str(std(BG2_est),3) ', CRBbg=' num2str(sqrt(CRBbg_2(z_pos(1))),3)]); 
     end
     
+    %%
 
+ratio=N1_est./N2_est.*squeeze(sum(sum(PSF1_s,1),2))./squeeze(sum(sum(PSF2_s,1),2)); 
+plot(ratio)

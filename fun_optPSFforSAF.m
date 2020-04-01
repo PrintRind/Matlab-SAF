@@ -21,6 +21,8 @@ for m=1:size(Ex_Px,3)
     I_yy=abs(czt2(Ey_Py(:,:,m).*exp(1i*phase).*mask,uk,ux,Nx)).^2;    
     I_xz=abs(czt2(Ex_Pz(:,:,m).*exp(1i*phase).*mask,uk,ux,Nx)).^2;
     I_yz=abs(czt2(Ey_Pz(:,:,m).*exp(1i*phase).*mask,uk,ux,Nx)).^2;
+    %PSF(:,:,m)=(I_xz+I_yz)/E_tot(m);
+
     PSF(:,:,m)=(I_xx+I_yx+I_xy+I_yy+I_xz+I_yz)/E_tot(m);
 end
 
@@ -32,8 +34,13 @@ plot(sqrt(CRBz(2:end))); pause(0);
 
 %choose metric for optimization
 
-metric1=mean(sqrt((CRBx(2:end).*CRBy(2:end).*CRBz(2:end))).^(1/3));  %"localization volume"
-metric2=mean(sqrt(CRBz(2:end))); 
+metric1=mean((sqrt((CRBx(2:end).*CRBy(2:end).*CRBz(2:end))).^(1/3)));  %"localization volume"
+metric2=mean((sqrt(abs(CRBz(2:end))))); 
 
-metric=metric2;
+wx=2; 
+wy=2; 
+wz=4; 
+metric3=mean((sqrt((CRBx(2:end).^wx.*CRBy(2:end).^wy.*CRBz(2:end).^wz)).^(1/3)));  %"localization volume"
+
+metric=metric1;
 

@@ -6,17 +6,21 @@
 clear all; 
 close all; 
 
-no_images=25; %number of simulated CCD images (=length of stack)
-n_img=350;  %pixel size length of each simulated camera image
-rho=0.02; %average molecule density 1/µm^2
-sig=1e6; %signal per molecule in the topimage in photons (refers to signal of brightest molecule)
-BG_top=00; %background level in photons in top image
-BG_bottom=00; %background level in photons in bottom image
+no_images=20; %number of simulated CCD images (=length of stack)
+n_img=100;  %length of each simulated camera image in pixels
+rho=0.5; %average molecule density 1/µm^2
+sig=10e3; %mean signal per molecule in the topimage in photons (refers to signal of brightest molecule)
+BG_top=100; %background level in photons in top image
+BG_bottom=100; %background level in photons in bottom image
+
+noise='y'; %should noise be added?
+signaltype='fixed'; %choose between 'fixed' or 'distr' for equally distributed
 
 %camera parameters
 gain=1; 
-amp=9.9; %set to 9.9 for andor; electrons per count 
-QE=0.95; %quantum efficiency
+amp=0.21; %set to 9.9 for andor; electrons per count 
+QE=0.75; %quantum efficiency
+base_level=100; %default camera offset value
 
 r_sphere=2.0e-3/2; %radius of calibration sphere (Alexa-coated ball lens)
 
@@ -26,14 +30,17 @@ theta=5;  %rotation angle in deg
 ratio=0.93; %ratio=energy_topimage/energy_bottomimage: power ratio between the two imaging channels(representing nonideal beamsplitter)
 
 %PSF-path
-PSFpath='C:\Users\q004aj\Desktop\PSFs\';
+PSFpath='C:\Users\q004aj\Desktop\PSFs\NA1,49\';
 %PSF for top image stack: 
-name_PSF_top='PSF5D_13x13_0-2-250nm_RI=1.45_dz=0_aberrfree_os3.mat';
+name_PSF_top='PSF_NA1.49_15x15_0-2-250nm_RI=1.33_dz=0_aberrfree.mat';
 %PSF for bottom image stack: 
-name_PSF_bottom='PSF5D_13x13_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat';
+name_PSF_bottom='PSF_NA1.49_15x15_0-2-250nm_RI=1.33_dz=-450_aberrfree.mat';
 
 
 %% loading "top-image" model (upper image on camera)
+
+%attention: for PSF, choose OVERSAMPLED (os=3 for instance),
+%three-dimensional PSFs
 
 %load('./PSFs/PSF5D_tot(top)_0-2-250nm_RI=1,45_dz=0_aberrfree.mat'); %loading 3D or 5D PSF-model
 
@@ -41,15 +48,15 @@ name_PSF_bottom='PSF5D_13x13_0-2-250nm_RI=1.45_dz=-500_aberrfree_os3.mat';
 %load([PSFpath 'PSF_0-2-250nm_RI=1,45_defoc=-400nm_aberrfree_os3.mat']); %loading 3D or 5D PSF-model
 load([PSFpath name_PSF_top]);
 
-two_ch='y'; %flag, indicating that two channels are simulated
+two_ch='n'; %flag, indicating that two channels are simulated
 
 if exist('PSF5D') %if 5D PSF is loaded 
    [nx0,ny0,nz0,nxi,nyi]=size(PSF5D);
    PSF_top=PSF5D(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)); %remove the unnecessary extra-dimensions
 else
-    PSF_top=PSF_tot; 
-    [nx0,ny0,nz0]=size(PSF_top); %size of model    
-    disp('3D-PSF loaded');
+   PSF_top=PSF_tot; 
+   [nx0,ny0,nz0]=size(PSF_top); %size of model    
+   disp('3D-PSF loaded');
 end
 
 E_top=trapz(trapz(PSF_top,1),2);
@@ -91,9 +98,17 @@ Kx=X/ux*uk;
 Ky=Y/ux*uk;
 
 %% calculating molecule positions and creating image stacks
+
 clear CCD_top CCD_bottom
 
 no_mols=round(rho*(n_img*os*ux*1e6)^2); %total number of molecules in a single CCD image
+%sig_mols=poissrnd(sig_mean,1,no_mols); %poisson distributed molecule brightness
+
+if strcmp(signaltype,'fixed');
+    sig_mols=ones(1,no_mols)*sig; 
+else
+    sig_mols=rand(1,no_mols)*sig; 
+end
 
 for mm=1:no_images
     disp(no_images-mm)
@@ -122,10 +137,10 @@ for mm=1:no_images
     end
     
     for m=1:no_mols %generating images according ot z-positions
-        I_top(:,:,m)=interpn(PSF_top,1:nx0,1:ny0,1+z_mol(m)/dz,'linear')*sig;
+        I_top(:,:,m)=sig_mols(m)*1*interpn(PSF_top,1:nx0,1:ny0,1+z_mol(m)/dz,'linear');
         
         if strcmp(two_ch,'y')
-            I_bottom(:,:,m)=interpn(PSF_bottom,1:nx0,1:ny0,1+z_mol(m)/dz,'linear')*sig;
+            I_bottom(:,:,m)=sig_mols(m)*1*interpn(PSF_bottom,1:nx0,1:ny0,1+z_mol(m)/dz,'linear');
         end
         
     end
@@ -158,14 +173,22 @@ for mm=1:no_images
             %B) interp-based shifting
             CCD_ideal_bottom=CCD_ideal_bottom+flipud(interp2(X,Y,tmp2,X-max(X(:))/2+xT_mol(m),Y+max(Y(:))/2-yT_mol(m),'linear',0));
         end
-        
     end
 
     % adding background and noise
-    CCD_top(:,:,mm)=uint16(poissrnd(os^2*imresize(CCD_ideal_top,1/os,'box')+BG_top)*gain/amp*QE);
+    if strcmp(noise,'y');
+        CCD_top(:,:,mm)=base_level+uint16(poissrnd(os^2*imresize(CCD_ideal_top,1/os,'box')+BG_top)*gain/amp*QE);
+    else
+        CCD_top(:,:,mm)=base_level+uint16((os^2*imresize(CCD_ideal_top,1/os,'box')+BG_top)*gain/amp*QE); %without noise
+    end 
+    
     
     if strcmp(two_ch,'y')
-        CCD_bottom(:,:,mm)=uint16(poissrnd((os^2*imresize(CCD_ideal_bottom,1/os,'box')+BG_bottom)/ratio)*gain/amp*QE);
+        if strcmp(noise,'y');
+            CCD_bottom(:,:,mm)=base_level+uint16(poissrnd((os^2*imresize(CCD_ideal_bottom,1/os,'box')+BG_bottom)/ratio)*gain/amp*QE);
+        else
+            CCD_bottom(:,:,mm)=base_level+uint16(((os^2*imresize(CCD_ideal_bottom,1/os,'box')+BG_bottom)/ratio)*gain/amp*QE);
+        end
     end
     
     
@@ -189,6 +212,7 @@ for mm=1:no_images
     
 end
 disp('done');
+
 %% saving data
 
 filename=['sig-bg=' num2str(sig,4) '-' num2str(BG_top,3) '_gain=' num2str(gain)  '_rho=' num2str(rho)];

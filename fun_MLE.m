@@ -39,7 +39,7 @@ end
 if ndims(PSF_norm)==3 %3D-PSF: requires interpolating in the function "fun_LLH" -> slow
     [nx0,~,nz0]=size(PSF_norm);
     fw=(nx0-nx)/2; %frame width
-    method='linear'; %interpolation method
+    method='nearest'; %interpolation method
     extrapval=0; %values assumed beyond interp-zone
     fun_LLH=@(v) sum(sum(v(5)+v(4)*interpn(PSF_norm,(fw+1:nx+fw)-v(1),(fw+1:ny+fw)'-v(2),v(3)+1,method,extrapval)-I.*log(v(5)+v(4)*interpn(PSF_norm,(fw+1:nx+fw)-v(1),(fw+1:ny+fw)'-v(2),v(3)+1,method,extrapval)),1),2);
 elseif ndims(PSF_norm)==5 %5D-PSF: no interpolation required
@@ -53,8 +53,8 @@ end
 
 BGmask1=zeros(nx,ny); %defining binary mask for initial background estimation
 BGmask1(1,:)=1; BGmask1(end,:)=1; BGmask1(:,1)=1; BGmask1(:,end)=1;
-BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
-    
+%BG00=sum(BGmask1(:).*I(:))/sum(BGmask1(:)); %initial background est.
+BG00=min(I(:));    
 
 if gaussfits==1
         %----Gaussfit for initial estimates of x-y-position,BG,N0-----

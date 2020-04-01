@@ -7,89 +7,110 @@
 clear all;
 %close all;
 
-global Z ux uk uz Ex_Px Ex_Py Ex_Pz Ey_Px Ey_Py Ey_Pz Nx n_photon bg mask  
+global Z PSF uk Ex_Px Ex_Py Ex_Pz Ey_Px Ey_Py Ey_Pz n_photon bg mask E_tot z_vec
 
 %% calculating BFP fields for SAF
 
 %---user parameters----
-os=3; %oversampling
-ux=117e-9/os; %resolution in focal space
-Nx=15*os; %desired simulated field size in pixel
+
+N=128; %pupil diameter in pixels
+
+cam=camera('orca fusion');
+lens=objective('olympus 1.49');
+f_tube=200e-3; %focal lenght of tube lens that was used in the actual experiment
+
+%--defining properties of the PSF to be created
+PSF=psf; %initialize PSF class
+PSF.lambda=670e-9; %vacuum wavelength
+PSF.os=3; %oversampling (set to 3 when calculating stack for performing estimates later)
+PSF.uz=5e-9;
+PSF.Nx=13*PSF.os; %desired simulated field size in pixel
+PSF.Ny=PSF.Nx;
+ 
+T=lens.transmission(N); 
+[~,~,R,pupil]=create_coord(N,1,'FFT');
 
 
+fits='n'; %perform fits to the PSFs? This will slow down the loop; choose 'y' or 'n'
 noise='n';  %set to 'y' or 'n'
-n_photon=1000; %number of camera counts in the brightest dipole-image
-bg=50; %mean background-counts level
+n_photon=2000; %number of camera counts in the brightest dipole-image
+bg=100; %mean background-counts level
 
-N=64;
-lambda_0=670e-9; %vacuum wavelength
-NA=1.67; RI=[1.33 1.33 1.78]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
-%NA=1.40; RI=[1.33 1.33 1.52]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
-d2=0e-9; %thickness of intermediate layer (layer 2)
-f=1.8e-3; %focal length of objective
-mu=1e-16; %magnitude of dipole (arbitrary value)
+z_vec=(0e-9:PSF.uz:250e-9); %simulated dipole distances above layer 2
+
+PSF.Nz=length(z_vec);
+RI_buffer=1.33;
+%intermediate layer
+RI_layer=RI_buffer; %refractive index of an intermediate layer on top of the coverlip (e.g. lipid bilayer)
+d_layer=0e-9; %thickness of intermediate layer (layer 2)
 
 %dz_vec=(-0.9:.005:0.1)*1e-6; %vector of defocus values - to simulate 3D PSFs
 dz_vec=-500e-9; %only a single defocus 
 
+%----------------------------------------------------------------------
+
+mu_x=1e-10; %magnitude of x-dipole (arbitrary value)
+mu_y=1e-10; %magnitude of y-dipole (arbitrary value)
+mu_z=1e-10; %magnitude of z-dipole (arbitrary value)
+mu=[mu_x mu_y mu_z]; %vector of dipole strengths
+
+PSF.ux=cam.pixsize/lens.M*lens.f_tube/f_tube/PSF.os; %effective pixel size in focal plane
+RI=[RI_buffer RI_layer lens.RI]; %refractive indices; RI=[RI_specimen, RI_intermed., RI_immoil]
 
 %----loading exp. aberrations-----
-load('coeff_2019-01-30_top_err0,15.mat'); Z_aberr2=Z_phase2;
-%for aberrations; %deactivate
-%line to simulate aberration-free case
+%Z_aberr2=zeros(1,35);
+%load('coeff_2020-02-07_NA1,47_err0,25.mat'); Z_aberr2=Z_phase2;
+%PSF.Zernike=[modes; Z_phase2];
+if exist('Z_amp')
+    %additional apodization in the objective pupil
+    Apo_mode(:,:,1)=1.*pupil;
+    Apo_mode(:,:,2)=-pupil.*(R/R(end/2,end)).^2+1;
+    Apo_mode(:,:,3)=-pupil.*(R/R(end/2,end)).^4+1;
+    Apo_mode(:,:,4)=-pupil.*(R/R(end/2,end)).^6+1;
+    
+    tmp=zeros(1,1,size(Apo_mode,3)); 
+    tmp(1,1,:)=Z_amp;
+    Apo=sum(Apo_mode.*repmat(tmp,[N,N,1]),3);
+    Apo=Apo/max(Apo(:));
+else
+    Apo=1;
+end
+
+%Z_aberr2=zeros(1,length(Z_aberr2)); Z_aberr2(3)=0; Z_aberr2(4)=0;  
+%Z_aberr2=Z_aberr2;
+%for aberrations; %deactivate line above to simulate aberration-free case
 %---------------------------------
 
 for mm=1:length(dz_vec)
    dz=dz_vec(mm);
    
 %dz=-300e-9;  %defocus of objective lens (negative values mean moving the focus into the fluid)
- 
-%-----------------------
-[SA_out,Defocus,~] =fun_SA_RImismatch(N,RI(3),RI(3),NA,lambda_0,1); %Defocus function refers to refractive index n2
 
-uk=4*pi/lambda_0*NA/N; %unit in pupil space (k-space)
-[~,~,R,pupil]=create_coord(N,1,'FFT');
+    [~,Defocus,~] =fun_SA_RImismatch(N,RI(3),RI(3),lens.NA,PSF.lambda,1); %Defocus function refers to refractive index n2
+    [SA_out,~,~] =fun_SA_RImismatch(N,RI(3),RI(1),lens.NA,PSF.lambda,1); %Defocus function refers to refractive index n2
 
-% considering objective transmission 
-    pol='full'; 
-    if strcmp(pol,'y');
-        load('ZernikeCoeff_y.mat');
-    elseif strcmp(pol,'x');
-        load('ZernikeCoeff_x.mat');
-    elseif strcmp(pol,'full');
-        load('ZernikeCoeff_full.mat');
+    uk=4*pi/PSF.lambda*lens.NA/N; %unit in pupil space (k-space)
+    
+
+    pupil_UAF=circshift(R<=((N/2)*(RI(1)/lens.NA))*1,[0 0]); %pupil containing UAF light
+
+    %-----considering aberrations-----
+    if exist('Z_aberr2') %if aberration Zernikes are loaded
+        Z_aberr2(1:2)=0; %delete tip, tilt to center the PSF
+        bar(Z_aberr2); 
+        aberr=sum(ZernikeCalc([2:(1+length(Z_aberr2))],Z_aberr2',pupil,'NOLL'),3); %aberration file "coef.mat" must be loaded 
+    else
+        aberr=0; 
+        %aberr=sum(ZernikeCalc([4 11 22],[2.1603    1.1705    1.1048]',pupil,'NOLL'),3);
+        disp('assuming NO aberrations');
     end
-    Im_Fit = sum(ZernikeCalc([1 4 5 6 11 12 13 22 37],ZernCoeff,length(pupil),'NOLL'),3);
-    Im_Fit = Im_Fit/max(Im_Fit(:));
-    obj_transm=Im_Fit; %for intenstiy
-    clear ZernCoeff; 
-
-%obj_transm=polyval([0.0832 0 -0.5199 0 1],asin(2/N*R*NA/RI(3))); %objective intensity transmission function model (from measurement with blue textmarker)
-
-pupil_UAF=circshift(R<=((N/2)*(RI(1)/NA))*1,[0 0]); %pupil containing UAF light
-
-%-----considering aberrations-----
-if exist('Z_aberr2') %if aberration Zernikes are loaded
-    Z_aberr2(1:2)=0; %delete tip, tilt to center the PSF
-    bar(Z_aberr2); 
-    aberr=sum(ZernikeCalc([2:37,56],Z_aberr2',pupil,'NOLL'),3); %aberration file "coef.mat" must be loaded 
-else
-    aberr=0; 
-    %aberr=sum(ZernikeCalc([4 11 22],[2.1603    1.1705    1.1048]',pupil,'NOLL'),3);
-    disp('assuming NO aberrations');
-end
-
-uz=2e-9;
-%z_vec=0e-9;
-z_vec=(0e-9:uz:250e-9); %simulated dipole distances above layer 2
-%z-dipole
 
 %calculating BFP-fields for all dipole orientations
 for m=1:length(z_vec)
     dipole=[0,0]; %[theta, phi], e.g. [0,0] for z-dipole, [pi/2,0] for x-dipole
-    [Ex_Pz(:,:,m),Ey_Pz(:,:,m)]=fun_dipole_imaging(N,lambda_0,NA,RI,[0,0],d2,z_vec(m),f,mu); %z-dipole
-    [Ex_Px(:,:,m),Ey_Px(:,:,m)]=fun_dipole_imaging(N,lambda_0,NA,RI,[pi/2, 0],d2,z_vec(m),f,mu); %x-dipole
-    [Ex_Py(:,:,m),Ey_Py(:,:,m)]=fun_dipole_imaging(N,lambda_0,NA,RI,[pi/2, pi/2],d2,z_vec(m),f,mu); %y-dipole
+    [Ex_Pz(:,:,m),Ey_Pz(:,:,m)]=fun_dipole_imaging(N,PSF.lambda,lens.NA,RI,[0,0],d_layer,z_vec(m),lens.f,mu_z,T); %z-dipole
+    [Ex_Px(:,:,m),Ey_Px(:,:,m)]=fun_dipole_imaging(N,PSF.lambda,lens.NA,RI,[pi/2, 0],d_layer,z_vec(m),lens.f,mu_x,T); %x-dipole
+    [Ex_Py(:,:,m),Ey_Py(:,:,m)]=fun_dipole_imaging(N,PSF.lambda,lens.NA,RI,[pi/2, pi/2],d_layer,z_vec(m),lens.f,mu_y,T); %y-dipole
 end
 disp('done');
 
@@ -103,8 +124,9 @@ clear I_BFP ratio I_BFP
 for m=1:length(z_vec) %BFP image number
 
         %user-defined additional pupil mask (incorporates objective transmission profile):
-        phase=0*(3.74)*pupil_UAF;
-        mask=pupil.*sqrt(obj_transm).*exp(1i*phase+1i*aberr+1i*dz*Defocus);
+        %phase=real(-SA_out).*(-dz_vec).*pupil_UAF; %correcting the RI-mismatch 
+        phase=0; 
+        mask=Apo.*pupil.*exp(1i*phase+1i*aberr+1i*dz*Defocus);
 
         figure(1);
         %I_BFP(m,:,:)=(abs(Ex_Px(:,:,m).*mask).^2+abs(Ex_Py(:,:,m).*mask).^2+abs(Ey_Px(:,:,m).*mask).^2+abs(Ey_Py(:,:,m).*mask).^2+abs(Ex_Pz(:,:,m).*mask).^2+abs(Ey_Pz(:,:,m).*mask).^2);
@@ -125,19 +147,18 @@ ratio=(E_tot-E_UAF)./E_UAF; %SAF/UAF ratio
 
 figure(2);
 plot(z_vec*1e9,ratio); xlabel('z / nm'); ylabel('SAF/UAF ratio'); grid on;
-title(['NA=' num2str(NA) ', RIs=' num2str(RI) ', \lambda_0=' num2str(lambda_0*1e9)]);
+title(['NA=' num2str(lens.NA) ', RIs=' num2str(RI) ', \lambda_0=' num2str(PSF.lambda*1e9)]);
 hold on;
+
 
 %% -----calculating PSF as seen on the camera for different emitter z-positions-----
 % calc of CCD images and CRBs for all z-values contained in z_vec
-
-fits='y'; %perform fits to the PSFs? This will slow down the loop; choose 'y' or 'n'
 
 clear PSF_tot PSF_SAF PSF_UAF Gfit_UAF Gfit_SAF
 
 if strcmp(fits,'y')
 %preparations for Gaussfit:
-    x_vec=linspace(-Nx/2+1,Nx/2,Nx); %required for Gaussfits
+    x_vec=linspace(-PSF.Nx/2+1,PSF.Nx/2,PSF.Nx); %required for Gaussfits
     x_data=zeros(length(x_vec), length(x_vec),2); %for lsqcurvefit Gaussfit
     [tmpX, tmpY]=meshgrid(x_vec,x_vec);
     x_data(:,:,1)=tmpX;
@@ -145,8 +166,8 @@ if strcmp(fits,'y')
 end
 
 figure(1);
-boundary=zeros(Nx,Nx); %border-mask to estimate background from PSF-images
-tmp=1/(4*(Nx-1)); %normalization such that sum(boundary(:)) equals 1
+boundary=zeros(PSF.Nx,PSF.Nx); %border-mask to estimate background from PSF-images
+tmp=1/(4*(PSF.Nx-1)); %normalization such that sum(boundary(:)) equals 1
 boundary(1,:)=tmp; boundary(end,:)=tmp; boundary(:,1)=tmp; boundary(:,end)=tmp; 
 
 
@@ -154,12 +175,13 @@ for m=1:length(z_vec)
     %I_CCD_x=abs(fftshift(fft2(ifftshift(embed(pupil.*(E_x(:,:,m)),N_pad,0))))).^2;
         
     %-----calculating total (SAF+UAF) images-----
-    I_xx=abs(czt2(Ex_Px(:,:,m).*mask,uk,ux,Nx)).^2;
-    I_yx=abs(czt2(Ey_Px(:,:,m).*mask,uk,ux,Nx)).^2;
-    I_xy=abs(czt2(Ex_Py(:,:,m).*mask,uk,ux,Nx)).^2;
-    I_yy=abs(czt2(Ey_Py(:,:,m).*mask,uk,ux,Nx)).^2;    
-    I_xz=abs(czt2(Ex_Pz(:,:,m).*mask,uk,ux,Nx)).^2;
-    I_yz=abs(czt2(Ey_Pz(:,:,m).*mask,uk,ux,Nx)).^2;
+    
+    I_xx=abs(czt2(Ex_Px(:,:,m).*mask,uk,PSF.ux,PSF.Nx)).^2;
+    I_yx=abs(czt2(Ey_Px(:,:,m).*mask,uk,PSF.ux,PSF.Nx)).^2;
+    I_xy=abs(czt2(Ex_Py(:,:,m).*mask,uk,PSF.ux,PSF.Nx)).^2;
+    I_yy=abs(czt2(Ey_Py(:,:,m).*mask,uk,PSF.ux,PSF.Nx)).^2;    
+    I_xz=abs(czt2(Ex_Pz(:,:,m).*mask,uk,PSF.ux,PSF.Nx)).^2;
+    I_yz=abs(czt2(Ey_Pz(:,:,m).*mask,uk,PSF.ux,PSF.Nx)).^2;
     PSF_tot(:,:,m)=(I_xx+I_yx+I_xy+I_yy+I_xz+I_yz)/E_tot(m); %normalization to total energy in BFP; we thus assume that the SAME energy comes through the objective lens for every z-distance (note that the energy would otherwise be different in the simulation for varying z-distances)
       
     %if m==1; C_norm=sum(sum(PSF_tot(:,:,1))); end %normalization to total intensity in first image (m=1)
@@ -172,15 +194,14 @@ for m=1:length(z_vec)
     
     est_offset=sum(sum(boundary.*PSF_tot(:,:,m))); %returns the mean value in the boundary-region
     energy_tot(m)=sum(sum(PSF_tot(:,:,m)-est_offset));
-
     
     %-----calculating UAF-images-----
-    I_xx=abs(czt2(Ex_Px(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;
-    I_yx=abs(czt2(Ey_Px(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;
-    I_xy=abs(czt2(Ex_Py(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;
-    I_yy=abs(czt2(Ey_Py(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;    
-    I_xz=abs(czt2(Ex_Pz(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;
-    I_yz=abs(czt2(Ey_Pz(:,:,m).*mask.*pupil_UAF,uk,ux,Nx)).^2;
+    I_xx=abs(czt2(Ex_Px(:,:,m).*mask.*pupil_UAF,uk,PSF.ux,PSF.Nx)).^2;
+    I_yx=abs(czt2(Ey_Px(:,:,m).*mask.*pupil_UAF,uk,PSF.ux,PSF.Nx)).^2;
+    I_xy=abs(czt2(Ex_Py(:,:,m).*mask.*pupil_UAF,uk,PSF.ux,PSF.Nx)).^2;
+    I_yy=abs(czt2(Ey_Py(:,:,m).*mask.*pupil_UAF,uk,PSF.ux,PSF.Nx)).^2;    
+    I_xz=abs(czt2(Ex_Pz(:,:,m).*mask.*pupil_UAF,uk,PSF.ux,PSF.Nx)).^2;
+    I_yz=abs(czt2(Ey_Pz(:,:,m).*mask.*pupil_UAF,uk,PSF.ux,PSF.Nx)).^2;
     PSF_UAF(:,:,m)=(I_xx+I_yx+I_xy+I_yy+I_xz+I_yz)/E_tot(m);    
     
     if strcmp(noise,'y') %if noise is selected
@@ -203,8 +224,8 @@ for m=1:length(z_vec)
         param_ini=[0 max(tmp(:)) 1 1 1]; %[offset amplitude x-shift y-shift width]; initial parameters for Gaussfit
         lb=[0 0 -length(x_vec)/2 -length(x_vec)/2 0.5]; %lower bounds for fit-parameters
         ub=[max(tmp(:)) max(tmp(:)) length(x_vec)/2 length(x_vec)/2 length(x_vec)/2]; %upper bounds
-        [Param,resnorm,residual,exitflag]=lsqcurvefit(@fun_gauss_and_offset_test_uaf,param_ini,x_data,tmp,lb,ub);
-        Gaussfit=fun_gauss_and_offset_test_uaf(Param,x_data);
+        [Param,resnorm,residual,exitflag]=lsqcurvefit(@fun_gauss_and_offset,param_ini,x_data,tmp,lb,ub);
+        Gaussfit=fun_gauss_and_offset(Param,x_data);
         Gfit_UAF(m)=Param(2)*2*pi*Param(5)^2; %energy contained (see e.g. formula in Thunderstorm script)
 
         %FIT METHOD B: two Gaussians with offset: [offset amp1 x-shift y-shift width1 amp2 width2]
@@ -268,20 +289,20 @@ xlabel('z / nm');
     z_plot=round([1, 2, 2*length(z_vec)/3, length(z_vec)]);
     figure(3);
     subplot(2,2,1);
-    imagesc(PSF_tot(:,:,z_plot(1)),[0 max(PSF_tot(:))]); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(1)))]);
+    imagesc(PSF_tot(:,:,z_plot(1))); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(1)))]);
     subplot(2,2,2);
     if length(z_vec)>=4
-        imagesc(PSF_tot(:,:,z_plot(2)),[0 max(PSF_tot(:))]); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(2)))]);
+        imagesc(PSF_tot(:,:,z_plot(2))); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(2)))]);
         subplot(2,2,3);
-        imagesc(PSF_tot(:,:,z_plot(3)),[0 max(PSF_tot(:))]); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(3)))]);
+        imagesc(PSF_tot(:,:,z_plot(3))); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(3)))]);
         subplot(2,2,4);
-        imagesc(PSF_tot(:,:,z_plot(4)),[0 max(PSF_tot(:))]); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(4)))]);
+        imagesc(PSF_tot(:,:,z_plot(4))); colorbar; axis equal; axis tight; title(['tot-PSF, z=' num2str(z_vec(z_plot(4)))]);
     end
     
 %%%saving tot- and UAF-PSF images to tif-stacks
 %     for m=1:length(z_vec);
-%         imwrite((PSF_tot(:,:,m)/max(PSF_tot(:))),['PSF_tot_'  ' uz=' num2str(uz) '_focus=' num2str(dz) '.tif'],'WriteMode','append');
-%         imwrite((PSF_UAF(:,:,m)/max(PSF_tot(:))),['PSF_UAF_'  ' uz=' num2str(uz) '_focus=' num2str(dz) '.tif'],'WriteMode','append');
+%         imwrite((PSF_tot(:,:,m)/max(PSF_tot(:))),['PSF_tot_'  ' PSF.uz=' num2str(PSF.uz) '_focus=' num2str(dz) '.tif'],'WriteMode','append');
+%         imwrite((PSF_UAF(:,:,m)/max(PSF_tot(:))),['PSF_UAF_'  ' PSF.uz=' num2str(PSF.uz) '_focus=' num2str(dz) '.tif'],'WriteMode','append');
 %     end
 if length(dz_vec)>1 
     PSF_defocus(:,:,mm)=PSF_tot; %if mm-loop is activated; %here you can choose between PSF_tot or PSF_UAF
@@ -289,9 +310,19 @@ end
 
 end  %end of mm-index loop 
 
-PSFpath='c:/users/q004aj/desktop/PSFs/';
-%save([PSFpath 'PSF_' num2str(Nx/os) 'x' num2str(Nx/os) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberr-2019-01-30_os3.mat'],'PSF_tot','PSF_UAF','z_vec','ux','NA','RI','os');
 
+if exist('Z_aberr2')~=1
+    Z_aberr2=0; 
+end
+if exist('Z_amp')~=1
+    Z_amp=0; 
+end
+
+PSFpath='c:/users/q004aj/desktop/PSFs/NA1,49/';
+PSFname=[PSFpath 'PSF_NA' num2str(lens.NA) '_' num2str(PSF.Nx/PSF.os) 'x' num2str(PSF.Nx/PSF.os) '_' num2str(z_vec(1)*1e9) '-' num2str(PSF.uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree.mat'];
+PSF.data=PSF_tot;
+
+%save(PSFname,'PSF','lens','RI','cam');
 
 %% optional: preparing 5D-PSF-model for use with "MLE_fit_molecules_exp" or "MLE_fit_molecules_2channels_exp"
 % PSF-model is expanded to 5D (interpolated along x-y directions)
@@ -310,15 +341,15 @@ end
 
 Ns=101; %interpolation-steps in x-y
 w=1; %(half) range of molecule x-y-offsets (in camera pixels) that should be covered with the interpolation
-sx=linspace(-w*os,w*os,Ns);
+sx=linspace(-w*PSF.os,w*PSF.os,Ns);
 sy=sx; 
-interp_incr=(sx(2)-sx(1))/os; %interpolation increment in units of pixels
+interp_incr=(sx(2)-sx(1))/PSF.os; %interpolation increment in units of pixels
 
-PSF5D=zeros(round(Nx/os)-2*w,round(Nx/os)-2*w,Nz,Ns,Ns);
+PSF5D=zeros(round(PSF.Nx/PSF.os)-2*w,round(PSF.Nx/PSF.os)-2*w,Nz,Ns,Ns);
 for mz=1:Nz
     for mx=1:Ns
         for my=1:Ns 
-            tmp=os^2*imresize(interp2(PSF_tmp(:,:,mz),(1:Nx)-sx(mx),(1:Nx)'-sy(my)),1/os,'box');
+            tmp=PSF.os^2*imresize(interp2(PSF_tmp(:,:,mz),(1:PSF.Nx)-sx(mx),(1:PSF.Nx)'-sy(my)),1/PSF.os,'box');
             PSF5D(:,:,mz,mx,my)=tmp(1+w:end-w,1+w:end-w); %cut the outer pixel frame because of potential sampling artifacts
         end
     end
@@ -327,10 +358,12 @@ end
 disp('done');
 PSF5D(isnan(PSF5D))=0;
 
-PSFpath='c:/users/q004aj/desktop/PSFs/';
-name=[PSFpath 'PSF5D_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num2str(z_vec(1)*1e9) '-' num2str(uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberr_2019-01-30_os3.mat'];
-%save(name,'PSF5D','z_vec','ux','NA','RI','interp_incr','os','sigma'); 
+PSFpath='c:/users/q004aj/desktop/PSFs/NA1,50/';
+name=[PSFpath 'PSF5D_NA' num2str(lens.NA) '_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num2str(z_vec(1)*1e9) '-' num2str(PSF.uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) '_aberrfree.mat'];
 
+
+
+%save(name,'PSF5D','z_vec','PSF.ux','lens','RI','interp_incr','PSF.os','Z_aberr2','Z_amp','mu'); 
     
 %% ---calculating CRBs----
 %for calculation of CRBs, the PSFs are individually normalized to contain the same
@@ -344,18 +377,18 @@ name=[PSFpath 'PSF5D_' num2str(size(PSF5D,1)) 'x' num2str(size(PSF5D,1)) '_' num
     %PSF_tot=PSF_B; %single channel 
     %PSF_tot=PSF_defocus; %if a "defocus"-stack has been calculated
     
-gain=1;    
+    
 nor=0; %should each z-slice of the PSF be normalized individually to contain n_photon photons?
-[CRBx,CRBy,CRBz]=fun_CRB(PSF_tot,ux,uz,n_photon,bg/os^2,gain,nor); %note that if PSF is oversampled the background needs to be adapted correspondingly
+[CRBx,CRBy,CRBz,~,~,FI]=fun_CRB(PSF,n_photon,bg,cam.gain,nor); %note that if PSF is oversampled the background needs to be adapted correspondingly
 figure(4);
-plot((1:length(CRBz))*uz*1e9,sqrt(CRBz),'b.-'); xlabel('z-pos in nm'); ylabel('nm');
+plot((1:length(CRBz))*PSF.uz*1e9,sqrt(CRBz),'b.-'); xlabel('z-pos in nm'); ylabel('nm');
 title(['sqrt(CRBz), cts=' num2str(n_photon) ', bg=' num2str(bg)]); grid on;
 %ylim([0 70]);
 
 figure(5);
-plot((1:length(CRBz))*uz*1e9,sqrt(CRBx)); xlabel('z-pos in nm'); ylabel('nm');
+plot((1:length(CRBz))*PSF.uz*1e9,sqrt(CRBx)); xlabel('z-pos in nm'); ylabel('nm');
 hold on; 
-plot((1:length(CRBz))*uz*1e9,sqrt(CRBy),'r.-'); xlabel('z-pos in nm'); ylabel('nm');
+plot((1:length(CRBz))*PSF.uz*1e9,sqrt(CRBy),'r.-'); xlabel('z-pos in nm'); ylabel('nm');
 title(['sqrt(CRBx), sqrt(CRBy) (red), cts='  num2str(n_photon) ', bg=' num2str(bg)]);
 hold off;
 grid on;
@@ -364,10 +397,19 @@ grid on;
 metric1=mean(sqrt((CRBx.*CRBy.*CRBz)).^(1/3))  %"localization volume"
 metric2=mean(sqrt(CRBz))
 
+%plotting FIsher infomration 
+
+figure(6); 
+plot((1:length(CRBz))*PSF.uz*1e9,squeeze(FI(1,1,:)));
+hold on; 
+plot((1:length(CRBz))*PSF.uz*1e9,squeeze(FI(3,3,:)));
+title('Fisher information x and z');
+xlabel('z-pos in nm'); ylabel('1/nm²');
+hold off; 
 
 %% A) for ZENIKE OPTIMIZATION: calculating Zernikes; the Zernike table is stored in Z and used by the
 %sub-routine "fun_optPSFforSAF.m"
-tmp=[11,22,37,56,5,6,7,8]; %Zernike modes (Noll scheme) to be included in the optimization
+tmp=[4,6]; %Zernike modes (Noll scheme) to be included in the optimization
 Z=ZernikeCalc(tmp,ones(length(tmp),1),pupil,'Noll');
 no_modes=size(Z,3); 
 
@@ -390,7 +432,7 @@ Z(:,:,1)=pupil_UAF;
 
 Z(:,:,1)=Defocus*1e-6; 
 %Z(:,:,2)=[];
-a_ini=-0.5;
+a_ini=0;
 
 %solution: Z=[2.1603    1.1705    1.1048]
 
@@ -399,4 +441,14 @@ a_ini=-0.5;
 %a_opt=fmincon(@fun_optPSFforSAF,a,eye(no_modes),ones(no_modes,1))
 options=optimset('Display','iter','Tolfun',1e-5);
 a_opt=fminsearch(@fun_optPSFforSAF,a_ini,options);
+disp(a_opt);
+
+%% minimizing CRB for biplane imaging
+
+Z=Defocus*1e-6;
+split_ratio_ini=0.5; 
+a_ini=[-0.25 -0.6 split_ratio_ini]; %initial defocus values in micron
+options=optimset('Display','iter','Tolfun',1e-5);
+
+a_opt=fminsearch(@fun_optPSFforSAF_biplane,a_ini,options);
 disp(a_opt);
