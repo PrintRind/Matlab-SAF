@@ -1,309 +1,316 @@
 %evaluate experimental molecule Data --> 3D localisations
 
-clear all; 
+clear all;  
+close all; 
 
 %% user parameters 
 
-%camera parameters
-gain=50;  %set gain to 1 if gain is switched off
-amp=9.8; %9.8; %electrons per count 
-QE=0.95; %quantum efficiency
-baseline=100; %offset level in ADUs; should be 100 for Andor ixon cams
-ux=117e-9; %effective camera pixel size
-r_sphere=2.0e-3/2; %radius of sphere
+mode='single'; %set mode: 'biplane' or 'single'
+                %NOTES for Biplane imaging: 
+                %-) images of the 2nd channel will be flipped! (to ease
+                %coord-transform)
+preflip='LR';  %for biplane imaging: flips images of 2nd channel left-right LR or UD; set to '' if no flip is desired
 
-sample='cos7'; %type of sample, e.g. 'sphere', 'cos7', etc.
+%choose PSF file(s)
+[PSF1_name,PSF1_path,~]=uigetfile('*.mat','choose PSF file for 1st channel.');
+load([PSF1_path PSF1_name]); 
+PSF1=PSF;
+
+if strcmp(mode,'biplane')
+    [PSF2_name,PSF2_path,~]=uigetfile('*.mat','choose PSF file of 2nd channel.');
+    load([PSF2_path PSF2_name]); 
+    PSF2=PSF;
+end
+
+%camera parameters
+cam=camera('andor ixon vienna')
+obj=objective('zeiss 1.45')
+f_tube=180e-3; %focal length of the tube lens that was used in the actual experiment (200e-3 for Innsbruck setup)
+
+ux=cam.pixsize/obj.M*obj.f_tube/f_tube; %effective camera pixel size
+r_sphere=15e-6; %radius of sphere (only relevant for sphere-sample)
+sample='nanoruler'; %type of sample, e.g. 'sphere', 'cos7', etc.
 qual_thresh=inf; %quality thrshold for MLE-fits (bad fits are discarded from the data); %the smaller the value the stricter is the selection.
 
-
-%% loading PSF model
-
-PSFpath='C:\Users\q004aj\Desktop\PSFs\';
-
-%3D PSFs:
-%load([PSFpath 'PSF_0-3-250nm_RI=1,45_defoc=-400nm_aberrfree.mat']); PSF=PSF_tot; %defocused PSF-model; should give better z-estimates
-%5D PSFs: (faster)
-
-%load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.33_dz=-500_aberr_2019-01-30_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-%load([PSFpath 'PSF5D_fine_13x13_0-2-250nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-%load([PSFpath 'PSF5D_13x13_0-0.5-10nm_RI=1.33_dz=-500_aberrfree_os3.mat']); PSF=PSF5D; 
-%load([PSFpath 'PSF5D_13x13_0-2-250nm_RI=1.45_dz=-600_aberr-2019-01-30_os3.mat']); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-
-ux=ux*os; 
-
-%"defocus" Stack (with varying defocus but constant SAF/UAF relations, i.e.
-%no change of molecule distance from the coverslip)
-%load('PSF5D_defocus_dz=-700 to -200nm_RI=1,45_aberrfree.mat'); PSF=PSF5D; %defocused PSF-model; should give better z-estimates
-
-if length(z_vec)>1
-    z=z_vec; %PSF model describes an "SAF-PSF" (fixed objetive defocus, but varying molecule distances from the coverslip
-else
-    z=dz_vec; %PSF model describes a "defocus" PSF (fixed mol. distance, but varying objective defoci
+disp('PSF loaded');
+if PSF.os*PSF.ux~=ux
+    disp('WARNING! discrepancy of pixel sizes!')
 end
 
-if exist('sigma')
-    z_ini_info=sigma/os; %if the loaded PSF-model contains a vector called "sigma"; sigma represents a gaussian-width-versus-z_ini-curve which provides a good initial z-estimate
-else  %otherwise, take the center-value of the entire z-range as initial estimate for z
-    z_ini_info=round(size(PSF,3)/2); %constant initial z-estimate (frame-no of PSF-stack)
-end
-
-if ndims(PSF)==3 %if "standard" 3D PSF is loaded (no interpolation in MLE necessary -> faster)
-    [nx0,ny0,nz0]=size(PSF); %size of model    clear PSF_tot;
-    %PSF: normalization of energy in each z-slice
-    energies=(trapz(trapz(PSF,1),2)); 
-    PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1]);
-    interp_incr=1; 
-elseif ndims(PSF)==5 
-    [nx0,ny0,nz0,nxi,nyi]=size(PSF); %size of model
-    clear PSF5D;
-    %PSF: normalization of energy in each z-slice
-    energies=(trapz(trapz(PSF(:,:,:,ceil((nxi+1)/2),ceil((nyi+1)/2)),1),2)); 
-    PSF_norm=PSF./repmat(energies,[size(PSF,1),size(PSF,2),1,nxi,nyi]);
-end
-disp('done');
-
-%dz_PSF=diff(PSF_norm,1,3); %calculating derivative along z (required for ML estimation)
-%PSF_norm(:,:,end)=[]; %delete last slice to match size of dz_PSF
-
-fw=0; %frame-width (width of border around the PSF-images, needed to allow for x-y-localization (shifts)); can be set to zero if a 5D PSF is used (becaues no interpolation is required in the function fun_MLE)
-       
-%create coordinate system 
-x=(fw+1:nx0-fw)-ceil((nx0+1)/2);
-y=(fw+1:ny0-fw)-ceil((nx0+1)/2);
-[X,Y]=ndgrid(x,y);
-clear x_data;
-x_data(:,:,1)=X; %coord. data in this form is required for Gaussfits which are used to find initial estimates for the MLE fit
-x_data(:,:,2)=Y; %coord. data in this form is required for Gaussfits which are used to find initial estimates for the MLE fit
-[nx, ny]=size(X); %size of molecule image
-
-%defining background mask for initial BG-estimate: 
-BGmask=zeros(nx,ny);
-BGmask(1,:)=1; BGmask(end,:)=1; BGmask(:,1)=1; BGmask(:,end)=1;
 
 %% reading in experimental data (movie of blinking molecules)
 
-use_EVER='y'; %background subtraction using EVER ('y') or no background subtraction ('n')
+use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
-clear data
-[Name,Path,~]=uigetfile('*.tif','choose multipage tif data','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
-    image_no=length(imfinfo([Path Name]));
-    progressbar;
-    for m=1:image_no
-       data(:,:,m)=double(imread([Path Name],m))-baseline;
-       progressbar(m/image_no);
-    end
-    
+clear data1 data2
+[Name1,Path1,~]=uigetfile('*.tif','choose multipage tif data of channel 1:','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
+ULC1=[10 20]; %row and column indices of the upper left corner ot the image stack with respect to the entire camera chip (important for sCMOS)
+
+if strcmp(mode,'biplane')
+    [Name2,Path2,~]=uigetfile('*.tif','choose multipage tif data of channel 2:','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
+    ULC2=[10 20]; %row and column indices of the upper left corner ot the image stack with respect to the entire camera chip (important for sCMOS)
+end
+
+image_no=length(imfinfo([Path1 Name1]));
+
+%------------load images of 1st channel-------------
+
+progressbar;
+for m=1:image_no
+  data1(:,:,m)=double(imread([Path1 Name1],m));
+  progressbar(m/image_no);
+end
+
+%data=bfopen([Path Name]);
+
 % EVER - background reduction
 %find minima in data stack
 
 if strcmp(use_EVER,'y') %use EVER bg-subtraction
-    V_min=min(data,[],3);
-    V_BG1=(V_min+27.8)/0.9513 ; 
-    imagesc(V_BG1); title('background');
-
-    %more complex version: 
-    % V_f=mean(data,3); %mean value of image set
-    % V_vf=V_f./min(data,[],3); %variation factor
-    % V_vr=mean(V_vf,[],3);
-    % A=0.9433*exp(0.03336*V_vr)-186100*exp(-15.89*V_vr);
-    % B=-600.6*exp(-4.131*V_vr)-22.9*exp(-.2063*V_vr); 
-
-    data_corr=data-repmat(V_BG1,1,1,size(data,3));
-    data_BG=V_BG1;
-    disp('done; EVER BG-corr. used');
-
+    [data1_corr, data_BG]=fun_EVER(data); 
 else
-    data_corr=data; 
-    data_BG=zeros(size(data_corr));
-    disp('done; no BG subtracted!');
+    data1_corr=data1; 
+    data1_BG=zeros(size(data1_corr));
 end
 
-%save('exp_data.mat','data_corr','data_BG');
+clear data1;
+
+%------------load images of 2nd channel-------------
+
+if strcmp(mode,'biplane')
+    
+    progressbar;
+    for m=1:image_no
+      if strcmp(preflip,'LR')
+        data2(:,:,m)=fliplr(double(imread([Path2 Name2],m)));
+      elseif strcmp(preflip,'UD')
+        data2(:,:,m)=flipud(double(imread([Path2 Name2],m)));
+      else
+        data2(:,:,m)=(double(imread([Path2 Name2],m))); 
+      end
+      progressbar(m/image_no);
+    end
+    
+    if strcmp(use_EVER,'y') %use EVER bg-subtraction
+        [data2_corr, data2_BG]=fun_EVER(data2); 
+    else
+        data2_corr=data2; 
+        data2_BG=zeros(size(data2_corr));
+    end
+    
+    clear data2;
+end
 
 
-%% optional: saving EVER-corrected stack, e.g. to be used with thunderstorm
+disp('all images loaded');
+
+%% optional: saving EVER-corrected stack, e.g. to be re-used with thunderstorm
 % 
 if strcmp(use_EVER,'y')
     for m=1:image_no
-        imwrite(uint16(data_corr(:,:,m)),[Name(1:end-4) '_EVER.tif'],'WriteMode','Append');
+        imwrite(uint16(data1_corr(:,:,m)),[Name1(1:end-4) '_EVER.tif'],'WriteMode','Append');
+    end
+
+    if strcmp(mode,'biplane')
+        for m=1:image_no
+            imwrite(uint16(data2_corr(:,:,m)),[Name2(1:end-4) '_EVER_CH2.tif'],'WriteMode','Append');
+        end
     end
 end
+
 disp('done');
 
 
+%% for biplane imaging: creating coordinate transform between the two stacks 
+%manual selection of point-pairs 
+
+if strcmp(mode,'biplane')
+
+    if isfile('transformpoints.mat') %if a coord. transform file is already contained in the current folder it is loaded
+        load transformpoints.mat
+        disp('transform matrix found and loaded.');
+    else  %otherwise, create a new transform matrix by clicking on matching points in the top and bottom images
+
+        prompt='no transform matrix found. Create one by clicking on matched point pairs. Do you have specific calib. images? (e.g. containing beads) (y/n)';
+        answer = inputdlg(prompt);
+
+        if strcmp(answer{1},'n')
+            img_frame=1; %frame to compare points
+            calib_image1=data1_corr(:,:,img_frame);
+            calib_image2=data2_corr(:,:,img_frame);
+        else
+           [Name,Path,~]=uigetfile('*.tif','choose TOP and BOTTOM calibration images','.\','MultiSelect','on');
+           calib_image1=imread([Path Name{1}]);
+           calib_image2=imread([Path Name{2}]);
+        end
+
+        cpselect(calib_image1/max(calib_image1(:)),calib_image2/max(calib_image2(:))); %save points as "movingPoints", "fixedPoints";
+        movingPoints= cpcorr(movingPoints, fixedPoints, calib_image1, calib_image2); %fine-tuning using cross-correlation
+        
+        %------saving points to harddrive-execute the following line--------: 
+        %save('transformpoints.mat','movingPoints','fixedPoints'); disp('transform matrix saved. ');
+        %--------------------------------------------------------------------
+    end
+
+end
 
 
-%%
-imagesc(data_corr(:,:,5));
+%% ESTIMATE using thunderstorm coordinates
 
-%% METHOD A : click & evaluate (only use for 3D-PSFs! Ohterwise, you must click with 1 pixel precision!)
-% 
-% img_no=4;
-% 
-% figure(1);
-% imagesc(data_corr(:,:,img_no)); colormap gray; axis equal; axis tight; 
-% title('exp. image');
-% [px, py] = getpts(gcf); %click on several molecules and press enter 
-% no_mols=length(px); 
-% 
-% clear tmp;
-% %extracting small molecule-images from camera frame
-% for m=1:no_mols
-%     data_tmp=data_corr(round((py(m)-floor((nx0-1)/2)+fw):(py(m)+ceil((nx0-1)/2))-fw),round((px(m)-floor((nx0-1)/2)+fw):(px(m)+ceil((nx0-1)/2)-fw)),img_no);
-%     bg_tmp=data_BG(round((py(m)-floor((nx0-1)/2)+fw):(py(m)+ceil((nx0-1)/2))-fw),round((px(m)-floor((nx0-1)/2)+fw):(px(m)+ceil((nx0-1)/2)-fw)));
-%     tmp(:,:,m)=data_tmp+mean(bg_tmp(:)); %adding mean background of the molecule frame (important for MLE)
-% end
-% 
-% data2=double(tmp/gain*amp/QE); %converting into units of photons; 
-% imagesc(data2(:,:,1)); title('fist exp. image / photons'); axis equal; axis tight; colorbar; 
-% 
-% %--- Estimating parameters ---
-%     
-% clear x_est y_est z_est z_est_nm BG_est N_est
-% 
-% for m=1:no_mols
-%         
-%     I=data2(:,:,m); %pick one experimental image
-% 
-%     est=fun_MLE(I,PSF_norm,interp_incr,x_data,z_ini,qual_thresh,1); %estimate molecule position 
-%     
-%     if isempty(est)==0
-%         x_est(m)=(round(py(m))+est(1))*ux*1e9;
-%         y_est(m)=(round(px(m))+est(2))*ux*1e9; %px measures along the column-direction
-%         z_est(m)=interp1(1:length(z),z,est(3))*1e9; %estimated z-position in nm
-%         N_est(m)=est(4)/gain*amp/QE;
-%         BG_est(m)=est(5)/gain*amp/QE;
-% 
-%         disp(m);
-%         imagesc(I); axis equal; axis tight; title(['sig./ bg =' num2str(N_est(m)) ' / ' num2str(BG_est(m))]); pause(0);
-%     end
-%     
-% end
-% 
-% figure(2); 
-% plot3(x_est/1e3,y_est/1e3,z_est,'o'); 
-% grid on;
-% hold on; 
-% zlabel('z / nm');
-% xlabel('x / µm');
-% ylabel('y / µm');
-% 
-% locdata_struct{img_no}=[x_est' y_est' z_est' N_est' BG_est'];
-% %save('loc_data_-750nm-model_-400nm-data_2018-09-26.mat','locdata_struct','NA','RI','z','ux');
-% 
-% %converting final localization data from struct-array into array
-% locdata=[];
-% for m=1:length(locdata_struct)
-%     locdata=[locdata; locdata_struct{m}];
-% end
-% 
-% disp(est);
+[Name_TS,Path_TS,~]=uigetfile('*.csv','choose Thunderstorm csv file:');
+tmp=csvread([Path_TS Name_TS],1,0);
 
-%% METHOD B: using thunderstorm coordinates
-% (works for 3D and 5D PSF models)
-
-tmp=csvread('TS.csv',1,0);
-%TS=tmp(1:50000,:);%select parts of the entire data
+%TS=tmp(1:5000,:); %select parts of the entire data
 TS=tmp;
 
 if size(TS,2)<10 %adding extra columns if TS-matrix has too few
     TS=[TS zeros(size(TS,1),10-size(TS,2))];
 end
         
-%data pre-filtering options
-thresh_dist=1400; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
+%----data pre-filtering------ 
+thresh_dist=1500; %minimum distance of a molecule to the next in nm (others are deleted in the function "RmNN")
 thresh_sigma=1*max(TS(:,5)); %sigma of Gaussian fit in nm
 thresh_uncert=1*max(TS(:,10)); %
+disp('prefiltering data...');
 TS_filt = RmNN(TS(end,2),TS,thresh_dist,thresh_sigma,thresh_uncert); %picking only those molecule images with no neighbours in the vicinity
 
-%use thunderstorm to find molecules. copy and paste resulting localization
-%table into Matlab under the varname "TS" (import as "MATRIX")
-%TS=[id, frame, x, y, sigma, intensity, offset,chi2]
-
-%saving or loading Thunderstorm (TS) localization data: 
-%save('TS_2018-10-10_0nm.mat','TS');
-%load TS_2018-09-26_-400nm.mat
-%TS(10000:end,:)=[];
-
-I=fun_thunderstorm_crop(TS_filt,data_corr,data_BG,(nx-1)/2,ux);
-px=TS_filt(:,3);%/(ux*1e9); %approx. position of molecules in nm
-py=TS_filt(:,4);%/(ux*1e9);
-
-clear x_est y_est z_est N_est BG_est resnorm_MLE loc_no frame_no chi2;
-
-m=0;
-clear locdata_TS resnorm_MLE loc_no x_est y_est z_est N_est BG_est;
-
-idx_disc=[];
-%progressbar; %initialize progressbar
+px=TS_filt(:,3); %approx. position of molecules in nm
+py=TS_filt(:,4);
 loc_no_tot=length(TS_filt);
+z_ini=0.5*PSF1.Nz*PSF1.uz; %initial z-estimate
 
-tic
-for mm=1:loc_no_tot
+fw=1; %frame width; size difference of cropped molecule images to PSF size; mol. images are smaller by [2*fw 2*fw]; should be set to 1 (if zero, "discretization artifacts" can occur in the estimated x,y,z coords)
+nx=PSF1.Nx/PSF1.os-2*fw;
+ny=PSF1.Ny/PSF1.os-2*fw;
+
+
+if strcmp(mode,'biplane')
+
+    %---------------calculating coords of locations in the bottom image---------
+    img_no=1; %choose test image from stack
+    tform = fitgeotrans(movingPoints,fixedPoints,'affine'); %finding transformation from selected points
+    TS_t=TS_filt; %initializing Thunderstorm coordinates for transformed (second) image
+    [xT,yT] = transformPointsForward(tform,TS_filt(:,3)/(ux*1e9),TS_filt(:,4)/(ux*1e9));
+
+    %<<<<<<<fine-adjust centering of bottom image by varying offset-values
+    offset=[0 0]*ux*1e9; %visually determined offset for crop-coordinates
+    TS_t(:,3:4)=[xT,yT]*(ux*1e9)-repmat(offset,size(TS_filt,1),1);
+
+    idx=TS_filt(:,2)==img_no;
     
-    if mm<100
-        showimage=1;
-    else
-        showimage=0;
-    end
+    figure(2); 
+    subplot(2,1,1);
+    imagesc(data1_corr(:,:,img_no)); hold on; title(['CH-A image no.' num2str(img_no) ' with overlaid TS-coords.']);
+    plot(TS_filt(idx,3)/(ux*1e9),TS_filt(idx,4)/(ux*1e9),'r.'); 
+    hold off;
+    subplot(2,1,2);
+    imagesc(data2_corr(:,:,img_no)); hold on; title(['CH-B image no.' num2str(img_no) ' with transformed TS-coords.']);
+    plot(TS_t(idx,3)/(ux*1e9),TS_t(idx,4)/(ux*1e9),'r.'); 
+    hold off;
+
+    data_BG=zeros(size(data1_corr));
+    [I1, ULC1_stack]=fun_thunderstorm_crop(TS_filt,data1_corr,data_BG,(nx-1)/2,ux); %crops molecule images in the top-image
+    [I2, ULC2_stack]=fun_thunderstorm_crop(TS_t,data2_corr,data_BG,(nx-1)/2,ux); %crops molecule images in the bottom-image
+
+    %delting locs where I_top or I_bottom is zero and deleting them (can happen if a
+    %rotation is involved and the loc is close to the image border)
+    idx=find((squeeze(sum(sum(I1,1),2))==0)|(squeeze(sum(sum(I2,1),2))==0)); 
+    TS_filt(idx,:)=[];
+    TS_t(idx,:)=[];
+    I1(:,:,idx)=[];
+    I2(:,:,idx)=[];
+
+    I{1}=I1;
+    I{2}=I2; 
+   
+    tic
+    est=fun_MLE3([PSF1 PSF2],I,z_ini);
+    toc
     
-    z_ini_info=80;
-    est=fun_MLE(I(:,:,mm),PSF_norm,interp_incr,x_data,z_ini_info,qual_thresh,showimage);
-    %est=fun_MLE_fast(I(:,:,mm),PSF_norm,interp_incr,z_ini,qual_thresh,[relpos(mm,:) TS(mm,6:7)/amp],showimage)
+    %adding coarse positional information of channel 2 from Thunderstorm
+    px=TS_filt(:,3); %approx. position of molecules in nm
+    py=TS_filt(:,4);
+    x2_est=(round(py/ux/1e9)+est(:,7)/ux)*ux*1e9; %note the round-operation! this is required because of the way the images are cropped in "fun_thunderstorm_crop"
+    y2_est=(round(px/ux/1e9)+est(:,8)/ux)*ux*1e9; %px measures along the row-direction (horizontal direction in image)
+
+     
+else %single plane mode
+
+    %----cropping single molecule images----
+    [I,ULC_stack]=fun_thunderstorm_crop(TS_filt,data1_corr,data1_BG,(nx-1)/2,ux);
+
+    %data.images=I;
+    %data.
     
-    if isempty(est) %if resnorm is too large, function returns est=[]
-        idx_disc=[idx_disc mm]; %indidces of images to be discarded
-    else
-        m=m+1;
-        %x_est(m)=py(mm);%
-        %y_est(m)=px(mm);% 
-        x_est(m)=(round(py(mm)/ux/1e9)+est(1))*ux*1e9; %note the round-operation! this is required because of the way the images are cropped in "fun_thunderstorm_crop"
-        y_est(m)=(round(px(mm)/ux/1e9)+est(2))*ux*1e9; %px measures along the row-direction (horizontal direction in image)
-        
-        z_est(m)=interp1(1:length(z),z,est(3))*1e9; %estimated z-position in nm
-        N_est(m)=est(4)/gain*amp/QE;
-        BG_est(m)=est(5)/gain*amp/QE;
-        resnorm_MLE(m)=est(6);
-        loc_no(m)=TS_filt(mm,1); %number of localization (temporal order)
-        frame_no(m)=TS_filt(mm,2); %number of image frame
-        chi2(m)=TS_filt(mm,8);
-        uncert(m)=TS_filt(mm,9);
-        %progressbar(mm/loc_no_tot);
-        
-        %test of x-y-localization
-%         figure(1); 
-%         imagesc(I(:,:,mm)); colormap gray; 
-%         hold on; 
-%         plot(est(2)+round(nx/2),est(1)+round(nx/2),'rx');
-%         hold off; 
-%         pause;
-    
-    end
+    tic
+    est=fun_MLE3(PSF,I,z_ini,cam);
+    toc
+
 end
-toc
 
-I(:,:,idx_disc)=[];
-disp('done');
+%adding coarse positional information from Thunderstorm
+px=TS_filt(:,3); %approx. position of molecules in nm
+py=TS_filt(:,4);
+loc_no_tot=length(TS_filt);
+x_est=(round(py/ux/1e9)+est(:,1)/ux)*ux*1e9; %note the round-operation! this is required because of the way the images are cropped in "fun_thunderstorm_crop"
+y_est=(round(px/ux/1e9)+est(:,2)/ux)*ux*1e9; %px measures along the row-direction (horizontal direction in image)
 
-locdata_TS=[x_est' y_est' z_est' N_est' BG_est' resnorm_MLE' loc_no' frame_no' chi2'];
+z_est=est(:,3)*1e9; %
+N_est=est(:,4);%/cam.gain*cam.amp/cam.QE;
+BG_est=est(:,5);%/cam.gain*cam.amp/cam.QE;
+res_est=est(:,6); %resnorm
+
+%adding data from the Thunderstorm file
+loc_no=TS_filt(:,1); %number of localization (temporal order)
+frame_no=TS_filt(:,2); %number of image frame
+chi2=TS_filt(:,8);
+uncert=TS_filt(:,9);
+
+if strcmp(mode,'biplane')
+    locdata=[x_est y_est z_est N_est BG_est loc_no frame_no chi2 uncert res_est x2_est y2_est];
+else
+    locdata=[x_est y_est z_est N_est BG_est loc_no frame_no chi2 uncert res_est];
+end
+
 z_drift=0;
+
+disp('done');
 
 %% saving localization results
 
-save(['LOCDATA_full_aberrfree_13x13PSF_dz-450nm_' Name '.mat'],'locdata_TS','ux','NA','gain','amp','QE','z','r_sphere','I');
+if exist('Z_aberr2')~=1
+    Z_aberr2=0;
+end
+
+if exist('Z_amp')~=1
+    Z_amp=0;
+end
+
+save(['LOCDATA_NA1,42_z=-550nm_15x15_z-ini=' num2str(z_ini) '_mindist=' num2str(thresh_dist) '_' mode '.mat'],'locdata','PSF','lens','cam','I','Z_amp');
+%save('filtdata_RI1,38_NA1,5_qt15.mat','filtdata');
 
 %% -- data eval, method B (thunderstorm)
 
-finaldata=locdata_TS; 
+%NOTE: if you notice a kind of discretization artefact of x and y positions at
+%higher values of x and y (e.g. to the upper right corner), this is
+%probably due to a pixelsize mismatch between Thunderstorm and this MATLAB
+%program (e.g. ux=115nm vs. ux=117nm) 
 
+%NOTE: for execution of this section, a PSF model must be loaded too
+
+if exist('sample')~=1 
+    sample='';
+end
+
+finaldata=locdata; 
 I_sel=I; %selected images
 
 % %DRIFT CORRECTION - interpolating frame-dependent drift values from the Thunderstorm-curves
-
+%drag "drift.csv" into workspace, slect "import as matrix" and select only
+%the last 4 columns.
 if exist('drift')
-    drift_x=interp1(drift(2:end,1),drift(2:end,2),finaldata(:,8));
-    drift_y=interp1(drift(2:end,3),drift(2:end,4),finaldata(:,8));
+    drift_x=interp1(drift(2:end,1),drift(2:end,2),finaldata(:,7));
+    drift_y=interp1(drift(2:end,3),drift(2:end,4),finaldata(:,7));
     plot(drift_x); hold on; plot(drift_y); xlabel('frame no.'); ylabel('drift/pix'); hold off; 
     finaldata(:,1)=finaldata(:,1)-1*drift_y*ux*1e9;
     finaldata(:,2)=finaldata(:,2)-1*drift_x*ux*1e9;
@@ -317,21 +324,21 @@ end
 %finaldata=locdata;   %manually selected molecules
 
 %----------deleting erroneous entries / filtering data -----------
-    r_cutoff=25e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
+    r_cutoff=3e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
 %manually defining sphere center
-    xc=[13 15]*1e3; %[x,y]
-    %xc=[1 1]*size(data,1)/2*ux*1e9; %center of image (for simus)
-    findcenter='y'; %automatic center-finding? set to 'y' or 'n'
+    xc=[4 4]*1e3; %[x,y]
+    %xc=[1 1]*200/2*ux*1e9; %center of image (for simus)
+    findcenter='n'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
-    no_c=0; %central local. no.
+    no_c=2000; %central local. no.
     no_delta=inf;  %half width, set inf to get all data
 %selecting a defined azimuthal section of the sphere 
     phi_c=0; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=15;  %the lower the cutoff, the more strict the selection
+    qual_thresh=inf;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
-    photon_loBND=0;
+    photon_loBND=500;
     photon_hiBND=inf;
 %----------------------------------------
 
@@ -341,24 +348,26 @@ finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
 %delete entries that run into upper z-boundaries
-idx=finaldata(:,3)>=0.9*max(z)*1e9;
-finaldata(idx,:)=[]; 
-I_sel(:,:,idx)=[]; 
+% idx=finaldata(:,3)>=0.99*PSF.uz*(PSF.Nz-1)*1e9;
+% finaldata(idx,:)=[]; 
+% I_sel(:,:,idx)=[]; 
 
 %delete entries that run into lower z-boundaries
-idx=finaldata(:,3)<=min(z)*1e9+1;
-finaldata(idx,:)=[]; 
-I_sel(:,:,idx)=[]; 
+% idx=finaldata(:,3)<=min(z)*1e9+1;
+% finaldata(idx,:)=[]; 
+% I_sel(:,:,idx)=[]; 
 
 %selecting temporal sections
 idx=abs(finaldata(:,7)-no_c)>no_delta;
 finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
-%delete entries which are too far away from the sphere center
-idx=((finaldata(:,1)-xc(1)).^2+(finaldata(:,2)-xc(2)).^2)>(r_cutoff*1e9)^2;
-finaldata(idx,:)=[];
-I_sel(:,:,idx)=[]; 
+% %delete entries which are too far away from the sphere center
+% if strcmp(sample,'sphere')
+%     idx=((finaldata(:,1)-xc(1)).^2+(finaldata(:,2)-xc(2)).^2)>(r_cutoff*1e9)^2;
+%     finaldata(idx,:)=[];
+%     I_sel(:,:,idx)=[]; 
+% end
 
 %selecting a defined azimuthal section of the sphere 
 y_tmp=finaldata(:,2)-xc(2); 
@@ -369,7 +378,7 @@ finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
 %delting entries with too high fit-errors (residuals)
-idx=finaldata(:,6)>qual_thresh*min(finaldata(:,6));
+idx=finaldata(:,10)>qual_thresh;%
 finaldata(idx,:)=[];
 I_sel(:,:,idx)=[]; 
 
@@ -392,13 +401,8 @@ mean_bg=mean(filtdata(:,5));
 
 %---calculating cramer-rao lower bounds---
 if exist('PSF')
-    if ndims(PSF)==5 
-        PSF3D=PSF(:,:,:,ceil((size(PSF,4)+1)/2),ceil((size(PSF,4)+1)/2));
-    else
-        PSF3D=PSF; 
-    end
-    
-    [CRBx,CRBy,CRBz]=fun_CRB(PSF3D./repmat(sum(sum(PSF3D,1),2),[size(PSF3D,1) size(PSF3D,2) 1]),ux,z(2)-z(1),mean_signal,mean_bg,gain,0);
+     
+    [CRBx,CRBy,CRBz]=fun_CRB(PSF,mean_signal,mean_bg,cam.gain,0);
     disp('------------------');
     disp('Cramer-Rao bounds:');
     disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
@@ -407,100 +411,7 @@ if exist('PSF')
     
 end
 
-%%---automatically finding optimal sphere-center: 
-r_coord=linspace(0,25,size(PSF,3))*1e-6; %radial coord. in m
-z_theory=r_sphere-sqrt(r_sphere^2-(r_coord).^2);
-CRBz_extrapol=interp1(z_vec,[CRBz CRBz(end)],z_theory); 
-
-clear r_mol z_batchmean
-%c=figure(3);
-%close(c);
-
-z_error=@(x) std(interp1(r_coord,z_theory,sqrt((filtdata(:,1)-x(1)).^2+(filtdata(:,2)-x(2)).^2)*1e-9,'linear','extrap')*1e9-filtdata(:,3));
-
-if strcmp(findcenter,'y') && strcmp(sample,'sphere')
-    
-    batchsize=500; %batchsize for determining sphere-center
-    z_driftcorr='n'; %should a z-drift correction be done?
-    N=max(ceil(length(filtdata)/batchsize),1);
-    xc0=xc;
-
-    for m=1:N %determining sphere center for each batch of data
-       batch=filtdata((1+(m-1)*min(batchsize,1e10)):min((1+m*batchsize),length(filtdata)),:);
-       xc(m,:)=fun_find_sphere_center(xc0,r_coord,z_theory,batch);
-       %xc(m,:)=xc0; %don't find sphere center
-       xc0=xc(m,:);
-       r_mol{m}=sqrt((batch(:,1)-(xc(1))).^2+(batch(:,2)-(xc(2))).^2)*1e-9; %radial molecule coords. in meter
-       delta_z(m)=z_error(xc(m,:)); %standard deviation in nm 
-       
-       if strcmp(z_driftcorr,'y')
-           %select x-y-subregion; in this region the mean z-value is used as a
-           %measure for drift; drift is then corrected
-           x_min=14e3; %for z-drift identificatoin
-           x_max=18e3; 
-           y_min=14e3;
-           y_max=18e3;
-           subbatch=batch((batch(:,1)>x_min)&(batch(:,1)<x_max)&(batch(:,2)>y_min)&(batch(:,2)<y_max),:);
-           z_batchmean(m)=mean(subbatch(:,3)); %mean z-value of batch; to identify z-drifts
-       else
-           z_batchmean(m)=0;
-       end
-       
-       %----MAIN PLOT: plotting radial distance versus estimated z-positions-----
-        figure(3);
-        markercolor=(batch(:,8)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
-        markercolor=[0 0 0];
-        plot(r_coord*1e6,z_theory*1e9,'r');
-        hold on; 
-        plot(r_coord*1e6,z_theory*1e9+sqrt(CRBz_extrapol),'r--');
-        plot(r_coord*1e6,z_theory*1e9-sqrt(CRBz_extrapol),'r--');
-        scatter(r_mol{m}*1e6,batch(:,3)-(z_batchmean(m)-z_batchmean(1)),3,markercolor); grid on; colorbar; 
-        xlabel('radial coord / µm');
-        ylabel('z /  nm');
-        title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(m,1)/1000,3) '/' num2str(xc(m,2)/1000) ' µm, std=' num2str(delta_z(m),2) 'nm, qual=' num2str(qual_thresh) ', sig/bg=' num2str(mean(filtdata(:,4)),4) '/' num2str(mean(filtdata(:,5)),3)]);
-        grid on;
-        ylim([0 250]);
-        colormap jet; 
-        
-    end
-        figure(31);
-        subplot(2,1,1);
-        plot(xc,'.-');
-        xlabel('batch no.');
-        ylabel('sphere center');
-        title('temporal development of sphere center');
-        subplot(2,1,2);
-        plot(z_batchmean); title('z-drift');
-        xlabel('batch no.');
-        ylabel('nm');
-        
-else
-        r_mol=sqrt((filtdata(:,1)-(xc(1))).^2+(filtdata(:,2)-(xc(2))).^2)*1e-9; %radial molecule coords. in meter
-        delta_z=z_error(xc);
-        
-        if strcmp(sample,'sphere')
-            figure(3);
-            markercolor=(filtdata(:,8)); %fildata(:,6)=quality of fit; filtdata(:,7)=no. of fit; filtdata(:,4)...signal
-            markercolor=[0 0 0];
-            markersize=2;
-            scatter(r_mol*1e6,filtdata(:,3),markersize,markercolor); grid on; %colorbar; 
-            hold on; 
-            %plot(r_mol*1e6,filtdata(:,3),'.',r_coord*1e6,z_theory*1e9,'r');
-            plot(r_coord*1e6,z_theory*1e9+[sqrt(CRBz_extrapol)],'r--');
-            plot(r_coord*1e6,z_theory*1e9-[sqrt(CRBz_extrapol)],'r--');
-            xlabel('radial coord / µm');
-            ylabel('z /  nm');
-            title([num2str(size(filtdata,1)) ' loc., spher-cent=' num2str(xc(1)/1000,3) '/' num2str(xc(2)/1000) ' µm, std=' num2str(delta_z,2) 'nm, qual=' num2str(qual_thresh) ', sig/bg=' num2str(mean(filtdata(:,4)),4) '/' num2str(mean(filtdata(:,5)),3)]);
-            grid on;
-            ylim([0 250]);
-            xlim([0 20]);
-            colormap jet; 
-            hold off;
-        end
-        
-end
-figure(3);
-hold off;
+z_vec=(0:PSF.Nz-1)*PSF.uz;
 
 %z_target=interp1(r_coord,z_theory,r_mol)*1e9; %traget z-value in nm
 
@@ -516,6 +427,23 @@ title('local. data, thunderstorm');
 zlabel('z / nm');
 xlabel('x / µm');
 ylabel('y / µm');
+
+
+
+h=figure(6); 
+markersize=1;
+markercolor=filtdata(:,3);% markercolor=uint8(markercolor);
+markersize=2;
+scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,markersize,markercolor);
+xlabel('x / µm');
+ylabel('y / µm');
+axis equal; axis tight; 
+colormap jet; 
+colorbar; 
+title('loc. data, z-values color-coded');
+% %
+set(gca,'Color','w');
+colormap parula; 
 
 % figure(2);
 % z_dev=filtdata(:,3)-(r_sphere-sqrt(r_sphere.^2-r_mol.^2))*1e9; %deviation of est. z-pos. from the sphere surface
@@ -542,18 +470,9 @@ title(['background, mean=' num2str(mean(filtdata(:,5)),2)]);
 xlabel('photons');
 ylabel('number of localizations');
 
-% ----2D scatterplot with color-coded z-value----
-figure(6); 
-markersize=0.2;
-markercolor=filtdata(:,3);% markercolor=uint8(markercolor);
-scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,markersize,markercolor);
-xlabel('x / µm');
-ylabel('y / µm');
-axis equal; axis tight; 
-colormap jet; 
-colorbar; 
-title('loc. data, z-values color-coded');
-% %
+%% ----2D scatterplot with color-coded z-value----
+
+
 % 
 % %---2D-scatterplot; signal-photon-no. color-coded---
 % figure(7);
@@ -569,6 +488,7 @@ title('loc. data, z-values color-coded');
 
 
 %% show details to the CURSOR-selected molecule image
+%slelect molecule in image first, then execute this block
 
 h=figure(6);
 dcm_obj = datacursormode(h);
@@ -586,9 +506,9 @@ title(['z=' num2str(filtdata(selected_loc_no,3),4)]);
 %% plotting only "heroes", i.e. molecules that are "on" for serveral consecutive frames
 
 %clear hero
-minlength=5; %minimum frame-no a hero is on
-bridgelength=0; %length of allowed "dark" frames in between on-frames
-binsize=50; %side length of spatial bins in nm
+minlength=6; %minimum frame-no a hero is on
+bridgelength=2; %length of allowed "dark" frames in between on-frames
+binsize=80; %side length of spatial bins in nm
   
 batchsize=20e3; 
 hero=[];
@@ -624,12 +544,16 @@ end
     %calculating CRLBs for heroes
     mean_signal_heroes=mean(hero_means(:,4));
     mean_bg_heroes=mean(hero_means(:,5));
-    [CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D,ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes,gain,0);
+    [CRBx_h,CRBy_h,CRBz_h]=fun_CRB(PSF3D,ux,z(2)-z(1),mean_signal_heroes,mean_bg_heroes,cam.gain,0);
     CRBz_h_extrapol=interp1(z_vec,[CRBz_h CRBz_h(end)],z_theory); 
 
+%hero(13)=[];
+    
 %% --- plotting z-mean vs. z-sigmas
 
-hero_sigmas_normed=hero_sigmas(:,3).*sqrt(hero_means(:,4)/mean_signal_heroes); %normalized standard deviations
+hero_sigmas_x_normed=hero_sigmas(:,1)./sqrt(hero_means(:,4)/mean_signal_heroes); %normalized standard deviations
+hero_sigmas_y_normed=hero_sigmas(:,2)./sqrt(hero_means(:,4)/mean_signal_heroes); %normalized standard deviations
+hero_sigmas_z_normed=hero_sigmas(:,3)./sqrt(hero_means(:,4)/mean_signal_heroes); %normalized standard deviations
 
 if strcmp(sample,'sphere') % if sample is sphere
     %finding best sphere center and plotting z-positions versus radial
@@ -641,7 +565,7 @@ if strcmp(sample,'sphere') % if sample is sphere
     figure(12); 
     subplot(2,1,1);
     r_heroes=sqrt((hero_means(:,1)-xc_heroes(1)).^2+(hero_means(:,2)-xc_heroes(2)).^2);
-    errorbar(r_heroes*1e-3,hero_means(:,3),hero_sigmas_normed,'.');
+    errorbar(r_heroes*1e-3,hero_means(:,3),hero_sigmas_z_normed,'.');
     hold on; 
     plot(r_coord*1e6,z_theory*1e9,'r')
     plot(r_coord*1e6,z_theory*1e9+[sqrt(CRBz_h_extrapol)],'r.');
@@ -664,8 +588,9 @@ else
     figure(12);
     %color=hero_means(:,8);%-min(hero_means(:,8));
     color=hero_lengths; 
+    color=[0 0 0]
     %----scatterplot----
-    scatter(hero_means(:,3),hero_sigmas_normed,[],color,'.');
+    scatter(hero_means(:,3),hero_sigmas_z_normed,[],color,'.');
     ylim([0 30]); xlim([0 220]);
     %----with x-errorbars---
 %     errorbar(hero_means(:,3),hero_sigmas_normed,hero_sigmas(:,3)./sqrt(hero_lengths),'horizontal','.'); 
@@ -677,24 +602,32 @@ else
     hold on; 
     plot(linspace(0,250,length(CRBz_h)),sqrt(CRBz_h)+0,'--');
     hold off; 
-    colormap jet; colorbar;
-    
+    colormap jet; 
+    ylim([0 30]); xlim([0 220]);
     
     %plotting x-y-sigmas
     figure(13);
-    plot(hero_means(:,3),hero_sigmas(:,2),'.'); 
+
+    %plot(hero_means(:,3),sqrt(hero_sigmas_x_normed.^2+hero_sigmas_y_normed.^2),'r.'); 
+    
+    plot(hero_means(:,3),hero_sigmas_x_normed,'r.'); 
     hold on; 
-    plot(hero_means(:,3),hero_sigmas(:,1),'.'); 
+    plot(hero_means(:,3),hero_sigmas_y_normed,'b.'); 
     plot(linspace(0,250,length(CRBx_h)),sqrt(CRBx_h)+0,'--');
     hold off; 
-    ylabel('\sigma_{x,y}');
-    
+    ylabel('\sigma_{x,y} / nm');
+    xlabel('mean z-value / nm');
+    grid on;   
+    title(['normalized \sigma_xy of heroes, binsze=' num2str(binsize) ' nm, minleng.=' num2str(minlength) '; bridgeleng.=' num2str(bridgelength)]);
+    ylim([0 55]); xlim([0 220]);
 end
+
 
   
 %% plot time traces of heroes 
+%close fig(15)
 
-m=1; 
+m=5; 
 meancorr=1;
 %for m=1:no_heroes
     markersize=3; 
@@ -778,18 +711,18 @@ title(['polynomial fit; std=' num2str(delta_z2,2) ' nm; qual-thresh=' num2str(qu
 
 figure(6);
 [px, py] = getpts(gcf);
-boxrad=300; %in nm; side length of squared selection "box" around selected point
+boxrad=500; %in nm; side length of squared selection "box" around selected point
 
 for m=1:length(px)
     idx=find(logical(abs(filtdata(:,1)-px(m)*1e3)<=boxrad) & logical(abs(filtdata(:,2)-py(m)*1e3)<=boxrad)); %finding indices of localizations that are within the selected area
     
-    figure(9);
-    markersize=2;
+    h=figure(9);
+    markersize=3;
     markercolor=filtdata(idx,3);% markercolor=uint8(markercolor);
 
-    scatter3(filtdata(idx,1)/1e3,filtdata(idx,2)/1e3,filtdata(idx,3),markersize,markercolor);
-    xlabel('x / µm');
-    ylabel('y / µm');
+    scatter3(filtdata(idx,1),filtdata(idx,2),filtdata(idx,3),markersize,markercolor);
+    xlabel('x / nm');
+    ylabel('y / nm');
     zlabel('z / nm');
     x_mean(m)=mean(filtdata(idx,1)); 
     x_std(m)=std(filtdata(idx,1));
@@ -801,7 +734,7 @@ for m=1:length(px)
     disp(['x-pos (mean/std) = ' num2str(x_mean(m)/1e3,3) 'µm /' num2str(x_std(m),3) 'nm']);
     disp(['y-pos (mean/std) = ' num2str(y_mean(m)/1e3,3) 'µm /' num2str(y_std(m),3) 'nm']);
     disp(['z-pos (mean/std) = ' num2str(z_mean(m),3) 'nm /' num2str(z_std(m),3) 'nm']);
-    colormap jet; 
+    colormap parula;  
     
     figure(10);
     subplot(3,1,1);
@@ -823,6 +756,23 @@ for m=1:length(px)
 end
 %save([Name '_eval.mat'],'x_mean','y_mean','z_mean','x_std','y_std','z_std','filtdata');
 
+%%
+
+figure(9); 
+ax=gca; 
+colormap parula; 
+set(gca,'Color','k');
+set(gca,'GridColor','w');
+
+set(gca,'xcolor','w'); 
+set(gca,'ycolor','w'); 
+set(gca,'zcolor','w'); 
+set(gca,'Linewidth',1); 
+xlim([4500 5500]);
+ylim([5000 5600]); 
+
+view([0,0])
+
 %% optional: spline fit to extract z-drift
 
 drift_spline = fit(filtdata(idx,8),filtdata(idx,3),'smoothingspline','SmoothingParam',35e-2);
@@ -831,7 +781,6 @@ plot(drift_spline,filtdata(idx,8),filtdata(idx,3),'.'); xlabel('frame no.'); yla
 tmp = ppval(drift_spline.p,filtdata(idx,8)); %z-correction curve
 z_drift=interp1(filtdata(idx,8),tmp,filtdata(:,8),'linear','extrap');
 z_drift=z_drift-mean(z_drift(:));
-
 
 %% ---- z-drift correction using the blue-laser feedback signal recorded in Labview
 %load drift-file (txt-file exported by Labview program "piezo control")
@@ -899,3 +848,4 @@ xlabel('x / µm');
 ylabel('y / µm');
 zlim([0 250]);
 
+%%
