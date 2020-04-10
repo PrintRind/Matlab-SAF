@@ -6,34 +6,37 @@ close all;
 %% ---user parameters----
 
 N=128; %pupil diameter in pixels
-z_max=250e-9; %maximal z-value
+z_max=250e-9; %maximal z-value (working range)
 
-cam=camera('andor ixon vienna');
-lens=objective('zeiss 1.45');
-%lens.NA=1.42; lens.RI=1.518; 
-f_tube=180e-3; %focal length of tube lens that was used in the actual experiment
+cam=camera('orca fusion'); %e.g. 'orca fusion'
+lens=objective('olympus 1.49');
+%lens.NA=1.325; 
+f_tube=200e-3; %focal length of tube lens that was used in the actual experiment
 
 %--defining properties of the PSF to be created
 PSF=psf; %initialize PSF class
 PSF.lambda=670e-9; %vacuum wavelength
+
+%z_max=PSF.lambda/2; 
+
 PSF.os=3; %oversampling (set to 3 when calculating stack for performing estimates later)
-PSF.uz=10e-9; %z-increment in meter
+PSF.uz=20e-9; %z-increment in meter
 PSF.Nx=15*PSF.os; %desired simulated field size in pixel
 PSF.Ny=PSF.Nx;
 z_vec=(0e-9:PSF.uz:z_max); %z-range, i.e., simulated dipole distances above layer 2 
 PSF.Nz=length(z_vec);
 PSF.RI=1.33; %refractive index of buffer
-PSF.defocus=-550e-9; %negative values = moving objective towards sample
+PSF.defocus=-500e-9; %negative values = moving objective towards sample
 
 T=lens.transmission(N); 
 [X,Y,R,pupil]=create_coord(N,1,'FFT');
 
-UseAberr='y'; %use aberrations?
+UseAberr='n'; %use aberrations?
     %if yes, choose Zernike vector (1st row: modes; 2nd row: magnitudes)and
     %apodization pupil image or load aberration file;
     if strcmp(UseAberr,'y')
-        %PSF.Zernike=[6 ; 1];Apo=1; %define modes and magnitudes here
-        aberr_filename='coeff_NA1,42_err0,26.mat'; 
+        %PSF.Zernike=[5 ; -1];Apo=1; %define modes and magnitudes here
+        aberr_filename='coeff_cyl_11,5deg.mat'; 
     end
     
 %define signal and BG for CRLB calculations
@@ -145,10 +148,10 @@ end
 
 ratio=(E_tot-E_UAF)./E_UAF; %SAF/UAF ratio
 
-% figure(2);
-% plot(z_vec*1e9,ratio); xlabel('z / nm'); ylabel('SAF/UAF ratio'); grid on;
-% title(['NA=' num2str(lens.NA) ', RIs=' num2str(RI) ', \lambda_0=' num2str(PSF.lambda*1e9)]);
-% hold on;
+figure(2);
+plot(z_vec*1e9,ratio); xlabel('z / nm'); ylabel('SAF/UAF ratio'); grid on;
+title(['NA=' num2str(lens.NA) ', RIs=' num2str(RI) ', \lambda_0=' num2str(PSF.lambda*1e9)]);
+hold on;
 
 %% -----calculating PSF as seen on the camera for different emitter z-positions-----
 % calc of CCD images and CRBs for all z-values contained in z_vec
@@ -201,10 +204,12 @@ PSFname=[PSFpath 'PSF_NA' num2str(lens.NA) '_' num2str(PSF.Nx/PSF.os) 'x' num2st
 PSF.data=PSF_tot;
 %save(PSFname,'PSF','lens','RI','cam');
   
-% --------calculating CRBs------------------------------
+%% --------calculating CRBs------------------------------
 
 %nor=0; %should each z-slice of the PSF be normalized individually to contain n_photon photons?
-[CRBx,CRBy,CRBz,~,~,FI]=PSF.CRLB(sig,bg,cam);
+eta=1; %detection efficiency of channel
+norm=1; %should PSF be normalized?
+[CRBx,CRBy,CRBz,~,~,FI]=PSF.CRLB(sig,bg,cam,eta,norm);
 
 figure(4);
 plot(z_vec*1e9,sqrt(CRBz),'r'); xlabel('z-pos in nm'); ylabel('nm');
@@ -230,16 +235,17 @@ grid on;
 
 clear Z;
 
-PSFtype=1; %1...Defocus
+PSFtype=5; %1...Defocus
            %2...Zernikes (z.B. Astigm.) + Defocus
            %3...Biplane 
            %4...phase ramp
+           %5...Donald
 
 %----for optimal defocus in single-channel imaging------
 if PSFtype==1 
 
     Z=Defocus*1e-6; 
-    a_ini=-0.4;
+    a_ini=-0.5;
     method='single ch., defocus';
 
 elseif PSFtype==2
@@ -248,7 +254,7 @@ elseif PSFtype==2
     modes=[6]; 
     Z(:,:,1)=Defocus*1e-6;
     Z(:,:,2:length(modes)+1)=ZernikeCalc(modes,ones(length(modes),1),pupil,'NOLL');
-    a_ini=zeros(1,size(Z,3));
+    a_ini=ones(1,size(Z,3));
     method=['single ch.: ' num2str(modes)]; 
 
 elseif PSFtype==3
@@ -258,7 +264,7 @@ elseif PSFtype==3
     Z(:,:,1)=Defocus*1e-6; 
     Z(:,:,2)=ZernikeCalc(6,1,pupil,'NOLL');%additional Zernike term for channel 1
     Z(:,:,3)=ZernikeCalc(6,1,pupil,'NOLL');%additional Zernike term for channel 2
-    a_ini=[0 -0.5]; %[defocus x, defocus y, split-ratio, Z1, Z2]
+    a_ini=[-1.3 -0.7]; %[defocus x, defocus y, split-ratio, Z1, Z2]
 
 elseif PSFtype==4 
     
@@ -269,6 +275,13 @@ elseif PSFtype==4
     a_ini=[0 0]; 
     method=['phase ramp']; 
 
+elseif PSFtype==5
+
+    %DONALD
+    method='donald'; 
+    Z(:,:,1)=Defocus*1e-6; 
+    a_ini=[0]; %common defocus for both channels
+       
 end
 %----------------------
 
@@ -282,8 +295,8 @@ E_tensor(:,:,:,6)=Ey_Pz;
 
 pupilmask=exp(1i*aberr); %additional, fixed, complex pupil mask
 metric=2; %1...x-y-z; 2...optimal z
-a_opt=fun_optimize_PSF(PSF,lens,cam,E_tensor,pupilmask,Z,a_ini,sig,bg,metric,method);
+a_opt=fun_optimize_PSF(PSF,lens,cam,E_tensor,pupilmask,Z,a_ini,sig,bg,metric,method,pupil_UAF);
 disp('optimal parameters: ');
 disp(a_opt);
 
-grid on; ylim([0 40]); 
+grid on; ylim([0 50]); 

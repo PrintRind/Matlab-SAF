@@ -14,17 +14,26 @@ function [a_opt, metric]=fun_optimize_PSF(PSF,lens,cam,E_tensor,pupilmask,Z,a_in
 %handling optional input arguments
 %1st optional argument: metric-type
 %2nd optoinal argument: biplane / single channel
+%3rd optional argument: pupil mask for Donald imaging, only if "donald" is
+%chosen for method
 nVarargs=length(varargin); 
 
 if nVarargs==1
     metrictype=varargin{1};
     method='';
+    pupil_UAF=1;
 elseif nVarargs==2
     metrictype=varargin{1};
     method=varargin{2}; 
+    pupil_UAF=1; 
+elseif nVarargs==3
+    metrictype=varargin{1};
+    method=varargin{2};
+    pupil_UAF=varargin{3}; %for Donald imaging
 else
     metrictype=1; 
     method='';
+    pupil_UAF=1; 
 end
 
 %------------------------------
@@ -37,7 +46,7 @@ PSF2.Nx=PSF.Nx/PSF.os;
 PSF2.Ny=PSF.Ny/PSF.os; 
 PSF2.data=zeros(PSF2.Nx,PSF2.Nx,PSF2.Nz);
 
-if strcmp(method,'biplane')
+if strcmp(method,'biplane') || strcmp(method,'donald')
     PSF3=PSF2; 
 end
 
@@ -55,7 +64,7 @@ uk=4*pi/PSF.lambda*lens.NA/Nk; %unit in pupil space (k-space)
 z=(0:PSF2.Nz-1)*PSF.uz*1e9; %for display purposes only
 norm=0; %normalize PSF? 
 
-options=optimset('Display','iter','Tolfun',1e-5);
+options=optimset('Display','iter','Tolfun',1e-7);
 
 %preparations for CZT2_fast.m
     ux_fft=2*pi/(Nk*uk); %fft resolution without padding
@@ -68,7 +77,7 @@ options=optimset('Display','iter','Tolfun',1e-5);
     F_kernel=fft2(ifftshift(kernel)); 
 
 
-if strcmp(method,'biplane')
+if strcmp(method,'biplane') || strcmp(method,'donald')
     
     if length(a_ini)==3 %if the split-ratio (parameter 3) is also variable
         LB=[-10, -10, 0]; %it is important to bound the split ratio!
@@ -94,7 +103,7 @@ function metric=fun_optimize(a)
     %calculate irradiance on camera, based on BFP fields and pupil phase
     for m=1:PSF.Nz
         %I_xx=abs(czt2(Ex_Px(:,:,m).*mask,uk,PSF2.ux,PSF2.Nx)).^2;
-        
+      
         I_xx=abs(czt2_fast(Ex_Px(:,:,m).*mask,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
         I_yx=abs(czt2_fast(Ey_Px(:,:,m).*mask,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
         I_xy=abs(czt2_fast(Ex_Py(:,:,m).*mask,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
@@ -141,19 +150,28 @@ function metric=fun_optimize_biplane(a)
     %two imaging channels, the third (optional) parameter, the split ratio
     %between the channels
     
+    if strcmp(method,'biplane');
     
-    if length(a)>=4 %if other modes have been chosen, too
-        phase1=a(1)*Z(:,:,1)+a(4)*Z(:,:,2);
-        mask1=pupilmask.*exp(1i*phase1); 
-        phase2=a(2)*Z(:,:,1)+a(5)*Z(:,:,3);
-        mask2=pupilmask.*exp(1i*phase2); 
-    else %pure biplane imaging, without additional Zernike modes    
+        %defining differences between the two channels: 
+        if length(a)>=4 %if other modes have been chosen, too
+            phase1=a(1)*Z(:,:,1)+a(4)*Z(:,:,2);
+            mask1=pupilmask.*exp(1i*phase1); 
+            phase2=a(2)*Z(:,:,1)+a(5)*Z(:,:,3);
+            mask2=pupilmask.*exp(1i*phase2); 
+        else %pure biplane imaging, without additional Zernike modes    
+            phase1=a(1)*Z(:,:,1);
+            mask1=pupilmask.*exp(1i*phase1); 
+            phase2=a(2)*Z(:,:,1);
+            mask2=pupilmask.*exp(1i*phase2); 
+        end
+        
+    elseif strcmp(method,'donald')
         phase1=a(1)*Z(:,:,1);
+        phase2=phase1; 
         mask1=pupilmask.*exp(1i*phase1); 
-        phase2=a(2)*Z(:,:,1);
-        mask2=pupilmask.*exp(1i*phase2); 
+        mask2=pupilmask.*pupil_UAF.*exp(1i*phase2);
     end
-    
+            
     if length(a)>=3  
         split_ratio=a(3);
     else
@@ -169,6 +187,7 @@ function metric=fun_optimize_biplane(a)
         I_xz=abs(czt2_fast(Ex_Pz(:,:,m).*mask1,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
         I_yz=abs(czt2_fast(Ey_Pz(:,:,m).*mask1,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
         PSF2.data(:,:,m)=(I_xx+I_yx+I_xy+I_yy+I_xz+I_yz)/E_tot(m);
+        %PSF2.data(:,:,m)=PSF2.data(:,:,m)/squeeze(sum(sum((I_xx+I_yx+I_xy+I_yy+I_xz+I_yz),1),2));
     end
     
     %second channel PSF
@@ -180,6 +199,7 @@ function metric=fun_optimize_biplane(a)
         I_xz=abs(czt2_fast(Ex_Pz(:,:,m).*mask2,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
         I_yz=abs(czt2_fast(Ey_Pz(:,:,m).*mask2,PSF2.Nx,N_pad,alpha,kernel,F_kernel)).^2;
         PSF3.data(:,:,m)=(I_xx+I_yx+I_xy+I_yy+I_xz+I_yz)/E_tot(m);
+        %PSF3.data(:,:,m)=PSF3.data(:,:,m)/squeeze(sum(sum((I_xx+I_yx+I_xy+I_yy+I_xz+I_yz),1),2));
     end
     
     %adding Fisher information of both channels
@@ -228,8 +248,6 @@ function metric=fun_optimize_biplane(a)
     pause(0);
 end
 
-
-
 function E_out=czt2_fast(E_in,Nx,N_pad,alpha,kernel,F_kernel)
     %fast version of 2D chirped z-trafo;
     %important parameters such as kernel,etc. are passed to the function
@@ -241,7 +259,6 @@ function E_out=czt2_fast(E_in,Nx,N_pad,alpha,kernel,F_kernel)
     coefs_phase=conj_kernel.*fftshift(ifft2(fft2(ifftshift(f1)).*F_kernel))*alpha;
     E_out=embed(coefs_phase,[Nx,Nx,size(coefs_phase,3)],0); 
 end
-
 
 end
 
