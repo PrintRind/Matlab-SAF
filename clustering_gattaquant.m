@@ -16,7 +16,7 @@ filtdata_sorted=sortrows(filtdata,1); %sort data according to x-coordinate
 %A) first look for clusters that are formed by single molecules to get rid of noise
 %when should a point be assigned to a cluster:
 epsilon=25; %max. allowed distance to neighbours % if the distance is chosen to be too small, a big cluster might get separated in multiple small ones 
-MinPts=10; %how many molecules should be in the neighborhood?
+MinPts=30; %how many molecules should be in the neighborhood?
 showNR='n'; %show nanorulers during data evaluation? (slow)
  
 %parameters for pairing clusters to nanorulers
@@ -26,9 +26,8 @@ MinPts_clu=2; %min. number of neighbors within that distance
 datalength=length(filtdata); 
 no_batches=ceil(datalength/batchsize);
 
-
-
-clear clu_idx NR c_msd c_mean
+clear clu_idx NR c_msd c_mean 
+NR_count=0;
 
 for b=1:no_batches
     
@@ -55,6 +54,7 @@ for b=1:no_batches
     end
         
     NR_idx=DBSCAN(c_mean,epsilon_clu,MinPts_clu); %creating numbers for clusters
+    NR_count=NR_count+max(NR_idx);
     disp([num2str(max(NR_idx)) ' nanorulers found.']);
 
     for m=1:max(NR_idx) %step through the nanorulers
@@ -124,7 +124,7 @@ figure(2); hold off;
 figure(3); hold off; 
 
 disp('done');
-
+disp([num2str(NR_count) ' nanorulers found']);
 
 
 

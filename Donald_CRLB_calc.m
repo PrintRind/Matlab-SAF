@@ -37,5 +37,5 @@ hold on;
 plot((0:length(CRBz)-1)*PSF1.uz*1e9,sqrt(CRBx)); xlabel('z-pos in nm'); ylabel('nm');
 plot((0:length(CRBz)-1)*PSF1.uz*1e9,sqrt(CRBy),'b.-'); xlabel('z-pos in nm'); ylabel('nm');
 title(['x,y,z precisions(z=red), cts='  num2str(sig) ', bg=' num2str(bg)]);
-ylim([0 50]);
+ylim([0 80]);
 title('DONALD');
