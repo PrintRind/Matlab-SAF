@@ -23,9 +23,9 @@ if strcmp(mode,'biplane')
 end
 
 %camera parameters
-cam=camera('andor ixon vienna')
-obj=objective('zeiss 1.45')
-f_tube=180e-3; %focal length of the tube lens that was used in the actual experiment (200e-3 for Innsbruck setup)
+cam=camera('orca fusion')
+obj=objective('olympus 1.49')
+f_tube=200e-3; %focal length of the tube lens that was used in the actual experiment (200e-3 for Innsbruck setup)
 
 ux=cam.pixsize/obj.M*obj.f_tube/f_tube; %effective camera pixel size
 r_sphere=15e-6; %radius of sphere (only relevant for sphere-sample)
@@ -286,7 +286,7 @@ if exist('Z_amp')~=1
     Z_amp=0;
 end
 
-save(['LOCDATA_NA1,42_z=-550nm_15x15_z-ini=' num2str(z_ini) '_mindist=' num2str(thresh_dist) '_' mode '.mat'],'locdata','PSF','lens','cam','I','Z_amp');
+save(['LOCDATA_-300nm_z-ini=' num2str(z_ini) '_mindist=' num2str(thresh_dist) '_' mode '.mat'],'locdata','PSF','lens','cam','I','Z_amp');
 %save('filtdata_RI1,38_NA1,5_qt15.mat','filtdata');
 
 %% -- data eval, method B (thunderstorm)
@@ -336,7 +336,7 @@ end
     phi_c=0; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=inf;  %the lower the cutoff, the more strict the selection
+    qual_thresh=20;  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
     photon_loBND=500;
     photon_hiBND=inf;
@@ -711,7 +711,7 @@ title(['polynomial fit; std=' num2str(delta_z2,2) ' nm; qual-thresh=' num2str(qu
 
 figure(6);
 [px, py] = getpts(gcf);
-boxrad=500; %in nm; side length of squared selection "box" around selected point
+boxrad=200; %in nm; side length of squared selection "box" around selected point
 
 for m=1:length(px)
     idx=find(logical(abs(filtdata(:,1)-px(m)*1e3)<=boxrad) & logical(abs(filtdata(:,2)-py(m)*1e3)<=boxrad)); %finding indices of localizations that are within the selected area
