@@ -15,8 +15,8 @@ filtdata_sorted=sortrows(filtdata,1); %sort data according to x-coordinate
 
 %A) first look for clusters that are formed by single molecules to get rid of noise
 %when should a point be assigned to a cluster:
-epsilon=25; %max. allowed distance to neighbours % if the distance is chosen to be too small, a big cluster might get separated in multiple small ones 
-MinPts=30; %how many molecules should be in the neighborhood?
+epsilon=20; %max. allowed distance to neighbours % if the distance is chosen to be too small, a big cluster might get separated in multiple small ones 
+MinPts=20; %how many molecules should be in the neighborhood?
 showNR='n'; %show nanorulers during data evaluation? (slow)
  
 %parameters for pairing clusters to nanorulers

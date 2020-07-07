@@ -28,8 +28,8 @@ obj=objective('olympus 1.49')
 f_tube=200e-3; %focal length of the tube lens that was used in the actual experiment (200e-3 for Innsbruck setup)
 
 ux=cam.pixsize/obj.M*obj.f_tube/f_tube; %effective camera pixel size
-r_sphere=15e-6; %radius of sphere (only relevant for sphere-sample)
-sample='nanoruler'; %type of sample, e.g. 'sphere', 'cos7', etc.
+r_sphere=14e-6; %radius of sphere (only relevant for sphere-sample)
+sample='NR'; %type of sample, e.g. 'sphere', 'cos7', etc.
 qual_thresh=inf; %quality thrshold for MLE-fits (bad fits are discarded from the data); %the smaller the value the stricter is the selection.
 
 disp('PSF loaded');
@@ -43,27 +43,37 @@ end
 use_EVER='n'; %background subtraction using EVER ('y') or no background subtraction ('n')
 
 clear data1 data2
-[Name1,Path1,~]=uigetfile('*.tif','choose multipage tif data of channel 1:','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
+[Name1,Path1,idx]=uigetfile({'*.tif';'*.h5'},'choose multipage tif data of channel 1:','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
 ULC1=[10 20]; %row and column indices of the upper left corner ot the image stack with respect to the entire camera chip (important for sCMOS)
 
 if strcmp(mode,'biplane')
-    [Name2,Path2,~]=uigetfile('*.tif','choose multipage tif data of channel 2:','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
+    [Name2,Path2,idx]=uigetfile({'*.tif';'*.h5'},'choose multipage tif data of channel 2:','C:\Users\q004aj\Documents\PROJEKTE\SAF-TIRF_Gerhard Schütz - Immunolog. Synapse\Data\2018-10-18\');
     ULC2=[10 20]; %row and column indices of the upper left corner ot the image stack with respect to the entire camera chip (important for sCMOS)
 end
 
-image_no=length(imfinfo([Path1 Name1]));
+
 
 %------------load images of 1st channel-------------
 
-progressbar;
-for m=1:image_no
-  data1(:,:,m)=double(imread([Path1 Name1],m));
-  progressbar(m/image_no);
+if idx==2 %if .h5 file was selected
+    fileinfo=h5info([Path1 Name1]);
+    data1 = hdf5read([Path1 Name1],'stack');
+    varmap=hdf5read([Path1 Name1],'var');
+    offsetmap=hdf5read([Path1 Name1],'offset');
+    gainmap=hdf5read([Path1 Name1],'gain');
+elseif idx==1 %if .tif file was selected
+    image_no=length(imfinfo([Path1 Name1]));
+    progressbar;
+    for m=1:image_no
+      data1(:,:,m)=double(imread([Path1 Name1],m));
+      progressbar(m/image_no);
+    end
 end
 
 %data=bfopen([Path Name]);
 
-% EVER - background reduction
+%EVER - background reduction
+
 %find minima in data stack
 
 if strcmp(use_EVER,'y') %use EVER bg-subtraction
@@ -78,30 +88,36 @@ clear data1;
 %------------load images of 2nd channel-------------
 
 if strcmp(mode,'biplane')
-    
-    progressbar;
-    for m=1:image_no
-      if strcmp(preflip,'LR')
-        data2(:,:,m)=fliplr(double(imread([Path2 Name2],m)));
-      elseif strcmp(preflip,'UD')
-        data2(:,:,m)=flipud(double(imread([Path2 Name2],m)));
-      else
-        data2(:,:,m)=(double(imread([Path2 Name2],m))); 
-      end
-      progressbar(m/image_no);
+
+    if idx==2 %if .h5 file was selected
+        data2 = hdf5read([Path2 Name2],'stack');
+    elseif idx==1 %if .tif file was selected
+        progressbar;
+        for m=1:image_no
+          if strcmp(preflip,'LR')
+            data2(:,:,m)=fliplr(double(imread([Path2 Name2],m)));
+          elseif strcmp(preflip,'UD')
+            data2(:,:,m)=flipud(double(imread([Path2 Name2],m)));
+          else
+            data2(:,:,m)=(double(imread([Path2 Name2],m))); 
+          end
+          progressbar(m/image_no);
+        end
     end
-    
+
     if strcmp(use_EVER,'y') %use EVER bg-subtraction
         [data2_corr, data2_BG]=fun_EVER(data2); 
     else
         data2_corr=data2; 
         data2_BG=zeros(size(data2_corr));
     end
-    
+
     clear data2;
 end
 
+    
 
+    
 disp('all images loaded');
 
 %% optional: saving EVER-corrected stack, e.g. to be re-used with thunderstorm
@@ -160,7 +176,7 @@ end
 [Name_TS,Path_TS,~]=uigetfile('*.csv','choose Thunderstorm csv file:');
 tmp=csvread([Path_TS Name_TS],1,0);
 
-%TS=tmp(1:5000,:); %select parts of the entire data
+%TS=tmp(1:500,:); %select parts of the entire data
 TS=tmp;
 
 if size(TS,2)<10 %adding extra columns if TS-matrix has too few
@@ -286,7 +302,7 @@ if exist('Z_amp')~=1
     Z_amp=0;
 end
 
-save(['LOCDATA_-300nm_z-ini=' num2str(z_ini) '_mindist=' num2str(thresh_dist) '_' mode '.mat'],'locdata','PSF','lens','cam','I','Z_amp');
+save(['LOCDATA_-200nm_z-ini=' num2str(z_ini) '_mindist=' num2str(thresh_dist) '_' mode '.mat'],'locdata','PSF','lens','cam','I','Z_amp');
 %save('filtdata_RI1,38_NA1,5_qt15.mat','filtdata');
 
 %% -- data eval, method B (thunderstorm)
@@ -325,10 +341,6 @@ end
 
 %----------deleting erroneous entries / filtering data -----------
     r_cutoff=3e-6; %cutoff distance from sphere center in m; choose a smaller cutoff size(e.g. 18µm) if center of sphere has to be determinedd
-%manually defining sphere center
-    xc=[4 4]*1e3; %[x,y]
-    %xc=[1 1]*200/2*ux*1e9; %center of image (for simus)
-    findcenter='n'; %automatic center-finding? set to 'y' or 'n'
 %select temporal junks of data to see time trends
     no_c=2000; %central local. no.
     no_delta=inf;  %half width, set inf to get all data
@@ -336,9 +348,9 @@ end
     phi_c=0; %central angle of cake-slice (in deg.)
     dphi=inf; %angular width of "cake-slice"
 %delting entries with too high fit-errors (residuals)
-    qual_thresh=20;  %the lower the cutoff, the more strict the selection
+    qual_thresh=1e-4  %the lower the cutoff, the more strict the selection
 %filtering data: photon threshold
-    photon_loBND=500;
+    photon_loBND=000;
     photon_hiBND=inf;
 %----------------------------------------
 
@@ -370,6 +382,7 @@ I_sel(:,:,idx)=[];
 % end
 
 %selecting a defined azimuthal section of the sphere 
+xc=[0 0]
 y_tmp=finaldata(:,2)-xc(2); 
 x_tmp=finaldata(:,1)-xc(1); 
 phi=atan2(y_tmp,x_tmp)/pi*180; %in deg
@@ -401,8 +414,8 @@ mean_bg=mean(filtdata(:,5));
 
 %---calculating cramer-rao lower bounds---
 if exist('PSF')
-     
-    [CRBx,CRBy,CRBz]=fun_CRB(PSF,mean_signal,mean_bg,cam.gain,0);
+    
+    [CRBx,CRBy,CRBz]=PSF.CRLB(mean_signal,mean_bg,cam);
     disp('------------------');
     disp('Cramer-Rao bounds:');
     disp(['min. sqrt(CRLB-x): ' num2str(min(sqrt(CRBx(:))),3)]);
@@ -428,8 +441,6 @@ zlabel('z / nm');
 xlabel('x / µm');
 ylabel('y / µm');
 
-
-
 h=figure(6); 
 markersize=1;
 markercolor=filtdata(:,3);% markercolor=uint8(markercolor);
@@ -445,17 +456,8 @@ title('loc. data, z-values color-coded');
 set(gca,'Color','w');
 colormap parula; 
 
-% figure(2);
-% z_dev=filtdata(:,3)-(r_sphere-sqrt(r_sphere.^2-r_mol.^2))*1e9; %deviation of est. z-pos. from the sphere surface
-% markercolor=z_dev;
-% scatter3(filtdata(:,1)/1e3,filtdata(:,2)/1e3,z_dev,markersize,markercolor); grid on;
-% colormap jet; 
-% colorbar; 
-% title('deviation from sphere surface');
-% zlabel('z / nm');
-% xlabel('x / µm');
-% ylabel('y / µm');
 
+%show photon statistics
 figure(4);
 subplot(2,1,1); 
 hist(filtdata(:,4),20);
@@ -470,22 +472,28 @@ title(['background, mean=' num2str(mean(filtdata(:,5)),2)]);
 xlabel('photons');
 ylabel('number of localizations');
 
-%% ----2D scatterplot with color-coded z-value----
+%% plot sphere cross section 
 
+if strcmp(sample,'sphere')
 
-% 
-% %---2D-scatterplot; signal-photon-no. color-coded---
-% figure(7);
-% markercolor=filtdata(:,4); 
-% %markercolor=uint8(markercolor/max(markercolor(:))*255*2);
-% scatter(filtdata(:,1)/1e3,filtdata(:,2)/1e3,2,markercolor);
-% xlabel('x / µm');
-% ylabel('y / µm');
-% axis equal; axis tight; 
-% colormap jet; 
-% colorbar; 
-% title('loc. data, photon-counts color-coded');
+    %manually defining sphere center
+    xc=[4.65 4.65]*1e3; %[x,y]
+    %xc=[1 1]*200/2*ux*1e9; %center of image (for simus)
+    %findcenter='n'; %automatic center-finding? set to 'y' or 'n'
 
+    r_mol=sqrt((filtdata(:,1)-xc(1)).^2+(filtdata(:,2)-xc(2)).^2);
+    z_dev=filtdata(:,3)-(r_sphere-sqrt(r_sphere.^2-r_mol.^2))*1e9; %deviation of est. z-pos. from the sphere surface
+    figure(2); 
+    plot(r_mol,filtdata(:,3),'.');
+    hold on; 
+    
+    r=linspace(0,max(r_mol),100); %in nm 
+    plot(r,(r_sphere*1e9-sqrt((r_sphere*1e9)^2-r.^2))+25,'r'); 
+    hold off; 
+    xlim([0 3000]);
+    ylim([0 250]);
+    grid on; 
+end
 
 %% show details to the CURSOR-selected molecule image
 %slelect molecule in image first, then execute this block
@@ -588,7 +596,7 @@ else
     figure(12);
     %color=hero_means(:,8);%-min(hero_means(:,8));
     color=hero_lengths; 
-    color=[0 0 0]
+    color=[0 0 0];
     %----scatterplot----
     scatter(hero_means(:,3),hero_sigmas_z_normed,[],color,'.');
     ylim([0 30]); xlim([0 220]);
@@ -621,8 +629,6 @@ else
     title(['normalized \sigma_xy of heroes, binsze=' num2str(binsize) ' nm, minleng.=' num2str(minlength) '; bridgeleng.=' num2str(bridgelength)]);
     ylim([0 55]); xlim([0 220]);
 end
-
-
   
 %% plot time traces of heroes 
 %close fig(15)
@@ -687,7 +693,6 @@ hold off;
 axis equal; axis tight; 
 
 hero(m).std(3)
-
 
 %% -----for sphere: polynomial fit through data to provide better precision estimate-----
 % %fitcoefs=polyfit(r_mol*1e6,filtdata(:,3),2);

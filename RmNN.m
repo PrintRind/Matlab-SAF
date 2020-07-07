@@ -19,7 +19,6 @@ function TS_sorted = RmNN(NrIMG,TS_,Treshold,Sigma,Uncertainty)
     TS_sorted=[];
     Delete_=[];
 
-
     for j=1:max(TS(:,2))
         Delete_=[];
         % steps gives starting point
