@@ -10,8 +10,8 @@ clear all;
 N=128; %pupil diameter in pixels 
 Nx=13; %field size in focal plane
 
-mode='biplane'; %'single' or 'biplane' or 'donald'
-PSF_type='biplane';  %define type of PSF that is used for evaluation "Ast" or "Defocus"
+mode='single'; %'single' or 'biplane' or 'donald'
+PSF_type='defocus';  %(important only for file/figure-naming); define type of PSF that is used for evaluation "Ast" or "Defocus"
 
 %% --- define PSF
 
@@ -26,17 +26,9 @@ PSF1=tmp.PSF;
 
 %optionally, load a 2nd PSF:
 if (strcmp(mode,'biplane')) || (strcmp(mode,'donald'))
-    
     [PSF2_name,PSF2_path,~]=uigetfile('*.mat','choose PSF file for 2nd channel.');
     tmp=load([PSF2_path PSF2_name]); 
     PSF2=tmp.PSF;
-
-    if strcmp(mode,'donald')
-        %E_uaf=(sum(sum(PSF2.data,1),2)); %correcting energy
-        %E_tot=(sum(sum(PSF1.data,1),2));
-       % PSF2.data=PSF2.data.*(E_uaf./E_tot);
-    end
-    
 end
 
 %% calculating molecule images with varying parameters (e.g. aberrations or dipole orientation etc.)
@@ -46,14 +38,15 @@ noise='n';
 sig=2000; 
 bg=100; 
 
-z_range=(0:10:250)*1e-9; %z-working range for localization
+z_range=(0:PSF1.uz:PSF1.uz*(PSF1.Nz-1)); %z-working range for localization
 
 %----define parameter to be varied-----------------------------------------
-no_vars=3; %number of variations
-var_parameter='Z11'; var_range=linspace(-0.25,0.25,no_vars);%e.g. 'Z5', 'Z1',etc. or 'z-dipole strength'
+
+%marechal criterion is 72 mlambda
+no_vars=11; %number of variations
+var_parameter='Z11'; var_range=linspace(-72e-3*2*pi,72e-3*2*pi,no_vars);%e.g. 'Z5', 'Z1',etc. or 'z-dipole strength'
 %var_parameter='Z8'; var_range=linspace(0,0.25,no_vars);%e.g. 'Z5', 'Z1',etc. or 'z-dipole strength'
 %var_parameter='z-dipole strength'; var_range=linspace(0,1,no_vars); %e.g. 'Z5', 'Z1',etc. or 'z-dipole strength'
-
 
 if exist('PSF2') %biplane imaging
     
@@ -106,7 +99,7 @@ else %single-channel imaging
     end
 end
 
-%-----estimate-----
+%------------estimate----------------
 
 z_ini=mean(z_range);
 clear x_est y_est z_est N_est BG_est I error
@@ -125,23 +118,26 @@ for v=1:no_vars
     z_est(v,:)=est(:,3)';
     N_est(v,:)=est(:,4)';
     BG_est(v,:)=est(:,5)';
-    error(v,:)=est(:,6)';
+    LLR(v,:)=est(:,6)'; %log-likelihood ratio (after Huang et al, suppl. mat.), should be zero for perfect fit
 end
-disp('done');
+disp('done, ready for display');
     
 
-%----- display results------------------------------------------------
+% ----- display results------------------------------------------------
 %---------------------------------------------------------------------
 
 zlim=[-150, 150]; 
-xylim=[-20, 20]; 
+xylim=[-100, 100]; 
 siglim=[-1000 1000]; 
 bglim=[-50,50];
-errlim=[0 1e-5];
+errlim=[0 50];
 
 legend_param=num2str(var_range);
 z_error=z_est-repmat(z_range,[no_vars,1]);
- 
+x_error=x_est; 
+y_error=y_est; 
+
+
 %------------display biases----------------------
 figure(2); 
 %sgtitle(['varying: ' var_parameter '; z-bias']);
@@ -185,13 +181,13 @@ xlim([0 max(z_range)*1e9]);
 ylim(bglim);
 
 subplot(3,2,5); 
-plot(z_range*1e9,error,'-');
+plot(z_range*1e9,LLR,'-');
 xlabel('z_{true} / nm');
 ylabel('error');
 grid on; 
-title('residual fit errors');
+title('log-likelihood ratio');
 xlim([0 max(z_range)*1e9]);
-ylim(errlim);
+%ylim(errlim);
 
 %---plotting CRLBs for the simulated image stacks---
 %this gives an idea on the obtainable preision if there were NO model
@@ -214,31 +210,43 @@ legend(legend_param);
 
 %adding CRLB info if noise was included
 if strcmp(noise,'y')
-    [Cx,Cy,Cz,CN,Cbg,~]=PSF.CRLB(sig,bg,cam,0);
-    
+    if strcmp(mode,'single')
+        [Cx,Cy,Cz,CN,Cbg,~]=PSF.CRLB(sig,bg,cam,1);
+    elseif strcmp(mode,'biplane') || strcmp(mode,'donald')
+        [~,~,~,~,~,FI1]=PSF1.CRLB(sig,bg,cam,0.5);
+        [~,~,~,~,~,FI2]=PSF2.CRLB(sig,bg,cam,0.5);
+        FI=FI1+FI2; 
+        for m=1:PSF1.Nz
+            tmp=inv(FI(:,:,m));
+            Cx(m)=tmp(1,1);
+            Cy(m)=tmp(2,2);
+            Cz(m)=tmp(3,3);
+            CN(m)=tmp(4,4);
+            Cbg(m)=tmp(5,5);
+        end
+    end
     subplot(3,2,1); 
     hold on; 
-    plot(z_range*1e9,sqrt([Cz(1) Cz]),'r--',z_range*1e9,-sqrt([Cz(1) Cz]),'r--');
+    plot(z_range*1e9,sqrt([Cz]),'r--',z_range*1e9,-sqrt([Cz]),'r--');
     hold off; 
     
     subplot(3,2,2); 
     hold on; 
-    plot(z_range*1e9,sqrt([Cx(1) Cx]),'r--',z_range*1e9,-sqrt([Cx(1) Cx]),'r--');
+    plot(z_range*1e9,sqrt([Cx]),'r--',z_range*1e9,-sqrt([Cx]),'r--');
     hold off; 
     
     subplot(3,2,3); 
     hold on; 
-    plot(z_range*1e9,sqrt([CN(1) CN]),'r--',z_range*1e9,-sqrt([CN(1) CN]),'r--');
+    plot(z_range*1e9,sqrt([CN]),'r--',z_range*1e9,-sqrt([CN]),'r--');
     hold off; 
 
     subplot(3,2,4); 
     hold on; 
-    plot(z_range*1e9,sqrt([Cbg(1) Cbg]),'r--',z_range*1e9,-sqrt([Cbg(1) Cbg]),'r--');
+    plot(z_range*1e9,sqrt([Cbg]),'r--',z_range*1e9,-sqrt([Cbg]),'r--');
     hold off; 
 end
 
 mtit([PSF_type ', varying ' var_parameter],'fontsize',12,'xoff',0,'yoff',0.04);
-
 
 hugo=legend; 
 hugo.String{1}='x'; 
@@ -249,11 +257,33 @@ hold off;
 
 %mtit([PSF_type ', varying ' var_parameter '=' num2str(var_range)],'fontsize',12,'xoff',0,'yoff',0.04);
 
+disp('all done, ready for saving data'); 
+
+% ----calculate mean squared errors---------------------------------------
+
+Ez=sqrt(sum((z_est-z_range).^2,2)/length(z_range)) %root mean squared z-error over the given z-range
+r_est=sqrt(x_est.^2+y_est.^2);
+Ex=sqrt(sum(x_est.^2,2)/length(z_range)) %root mean squared x-error over the given z-range
+Ey=sqrt(sum(y_est.^2,2)/length(z_range)) %root mean squared y-error over the given z-range
+Esig=sqrt(sum((N_est-sig).^2,2)/length(z_range))/sig*100; %in percent 
+Ebg=sqrt(sum((BG_est-bg).^2,2)/length(z_range))/bg*100;  %in percent
+
+figure(3); 
+subplot(2,1,1);
+plot(var_range,[Ez, Ex, Ey]*1e9,'o-');
+xlabel('parameter');
+ylabel('RMS error / nm');
+legend('Ez','Ex','Ey');
+subplot(2,1,2);
+plot(var_range,[Esig, Ebg],'o-');
+xlabel('parameter');
+ylabel('RMS error / percent');
+legend('Esig','Ebg');
 
 %% saving data
 
 %figure(2);
-save([PSF_type '_' var_parameter '.mat'],'x_est','y_est','z_est','N_est','BG_est','error','CRBx','CRBy','CRBz','var_range','sig','bg','z_range');
+save([cd '\biases\' PSF_type '_' var_parameter '.mat'],'x_est','y_est','z_est','N_est','BG_est','error','CRBx','CRBy','CRBz','var_range','sig','bg','z_range');
 % figure(3); 
 % savefig([PSF_type '_' var_parameter '_errors.fig']);
 % figure(5);

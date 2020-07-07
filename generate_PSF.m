@@ -10,7 +10,7 @@ z_max=250e-9; %maximal z-value (working range)
 
 cam=camera('orca fusion'); %e.g. 'orca fusion'
 lens=objective('olympus 1.49');
-%lens.NA=1.325; 
+
 f_tube=200e-3; %focal length of tube lens that was used in the actual experiment
 
 %--defining properties of the PSF to be created
@@ -19,29 +19,29 @@ PSF.lambda=670e-9; %vacuum wavelength
 
 %z_max=PSF.lambda/2; 
 
-PSF.os=3; %oversampling (set to 3 when calculating stack for performing estimates later)
+PSF.os=2; %oversampling (set to 3 when calculating stack for performing estimates later)
 PSF.uz=20e-9; %z-increment in meter
 PSF.Nx=15*PSF.os; %desired simulated field size in pixel
 PSF.Ny=PSF.Nx;
 z_vec=(0e-9:PSF.uz:z_max); %z-range, i.e., simulated dipole distances above layer 2 
 PSF.Nz=length(z_vec);
 PSF.RI=1.33; %refractive index of buffer
-PSF.defocus=-500e-9; %negative values = moving objective towards sample
+PSF.defocus=-70e-9; %negative values = moving objective towards sample
 
 T=lens.transmission(N); 
 [X,Y,R,pupil]=create_coord(N,1,'FFT');
 
-UseAberr='n'; %use aberrations?
+UseAberr='y'; %use aberrations?
     %if yes, choose Zernike vector (1st row: modes; 2nd row: magnitudes)and
     %apodization pupil image or load aberration file;
     if strcmp(UseAberr,'y')
         %PSF.Zernike=[5 ; -1];Apo=1; %define modes and magnitudes here
-        aberr_filename='coeff_cyl_11,5deg.mat'; 
+        aberr_filename='aberr_coeff_cyl.mat'; 
     end
     
 %define signal and BG for CRLB calculations
 sig=2000; %number of camera counts in the brightest dipole-image
-bg=100; %mean background level in photons per pixel
+bg=20; %mean background level in photons per pixel
 
 %intermediate layer
 RI_layer=PSF.RI; %refractive index of an intermediate layer on top of the coverlip (e.g. lipid bilayer)
@@ -200,16 +200,15 @@ end
 
 %PSFpath='c:/users/q004aj/desktop/PSFs/NA1,49/';
 PSFpath='';
-PSFname=[PSFpath 'PSF_NA' num2str(lens.NA) '_' num2str(PSF.Nx/PSF.os) 'x' num2str(PSF.Nx/PSF.os) '_' num2str(z_vec(1)*1e9) '-' num2str(PSF.uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) 'nm_aberr=' UseAberr '.mat'];
+PSFname=[PSFpath 'PSF_Cyl_NA' num2str(lens.NA) '_' num2str(PSF.Nx/PSF.os) 'x' num2str(PSF.Nx/PSF.os) '_' num2str(z_vec(1)*1e9) '-' num2str(PSF.uz*1e9) '-' num2str(z_vec(end)*1e9) 'nm_RI=' num2str(RI(1),3) '_dz=' num2str(dz*1e9) 'nm_aberr=' UseAberr '.mat'];
 PSF.data=PSF_tot;
 %save(PSFname,'PSF','lens','RI','cam');
   
-%% --------calculating CRBs------------------------------
+%--------calculating CRBs------------------------------
 
 %nor=0; %should each z-slice of the PSF be normalized individually to contain n_photon photons?
 eta=1; %detection efficiency of channel
-norm=1; %should PSF be normalized?
-[CRBx,CRBy,CRBz,~,~,FI]=PSF.CRLB(sig,bg,cam,eta,norm);
+[CRBx,CRBy,CRBz,CRBsig,~,FI]=PSF.CRLB(sig,bg,cam,eta);
 
 figure(4);
 plot(z_vec*1e9,sqrt(CRBz),'r'); xlabel('z-pos in nm'); ylabel('nm');
@@ -235,14 +234,14 @@ grid on;
 
 clear Z;
 
-PSFtype=5; %1...Defocus
+PSFtype=1; %1...Defocus
            %2...Zernikes (z.B. Astigm.) + Defocus
            %3...Biplane 
            %4...phase ramp
            %5...Donald
 
 %----for optimal defocus in single-channel imaging------
-if PSFtype==1 
+if PSFtype==1
 
     Z=Defocus*1e-6; 
     a_ini=-0.5;
@@ -264,7 +263,7 @@ elseif PSFtype==3
     Z(:,:,1)=Defocus*1e-6; 
     Z(:,:,2)=ZernikeCalc(6,1,pupil,'NOLL');%additional Zernike term for channel 1
     Z(:,:,3)=ZernikeCalc(6,1,pupil,'NOLL');%additional Zernike term for channel 2
-    a_ini=[-1.3 -0.7]; %[defocus x, defocus y, split-ratio, Z1, Z2]
+    a_ini=[0 -0.5]; %[defocus x, defocus y, split-ratio, Z1, Z2]
 
 elseif PSFtype==4 
     
@@ -280,7 +279,8 @@ elseif PSFtype==5
     %DONALD
     method='donald'; 
     Z(:,:,1)=Defocus*1e-6; 
-    a_ini=[0]; %common defocus for both channels
+    %Z(:,:,2)=Z(:,:,1); 
+    a_ini=[-0.5]; %one defocus value for both channels
        
 end
 %----------------------
@@ -300,3 +300,53 @@ disp('optimal parameters: ');
 disp(a_opt);
 
 grid on; ylim([0 50]); 
+
+
+%% for paper - generating CRLB-maps for defined parameter ranges
+
+if PSFtype==1 %defocus
+    %a_opt=-0.54; 
+    a{1}=a_opt+[-1:0.1:1]; a{2}=1;  
+elseif PSFtype==2  %ast
+    a{1}=a_opt(1)+[-0.6:0.1:0.6]; %defocus
+    a{2}=a_opt(2)+[-1:0.1:1]; %Z6
+elseif PSFtype==3  %biplane
+    a{1}=a_opt(1)+[-0.5:0.05:0.5]; %defocus 1
+    a{2}=a_opt(2)+[-0.5:0.05:0.5]; %defocus 2
+elseif PSFtype==5 %Donald
+    a{1}=a_opt(1)+[-0.5:0.05:0.5]; %defocus 1   
+    %a{2}=a_opt(1)+[-0.5:0.05:0.5]; %defocus 1    
+end
+
+map=fun_parameter_maps(PSF,lens,cam,E_tensor,pupilmask,Z,a,sig,bg,method);
+
+%rearrange dimensions if only one parameter was varied: 
+if ndims(map)==2 
+    tmp=map; 
+    map=ones(3,1,length(tmp)); 
+    map(:,1,:)=tmp(:,:); 
+end    
+
+%% showing parameters maps
+
+figure(1);
+
+subplot(3,1,1);
+imagesc(a{1},a{2},(squeeze(map(1,:,:)))'); 
+colormap jet; 
+colorbar; 
+axis equal; axis tight; 
+
+subplot(3,1,2);
+imagesc(a{1},a{2},(squeeze(map(2,:,:)))'); 
+colorbar; 
+axis equal; axis tight; 
+
+subplot(3,1,3);
+imagesc(a{1},a{2},(squeeze(map(3,:,:)))'); 
+axis equal; axis tight; 
+colorbar; 
+
+%% saving stability map
+
+%save([cd '\stab maps\stab_map_salm.mat'],'map','a')

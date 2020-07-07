@@ -1,4 +1,4 @@
-function [a_opt, metric]=fun_optimize_PSF(PSF,lens,cam,E_tensor,pupilmask,Z,a_ini,sig,bg,varargin)
+function [a_opt, fval]=fun_optimize_PSF(PSF,lens,cam,E_tensor,pupilmask,Z,a_ini,sig,bg,varargin)
 %find optimal pupil phase based on a CRLB-based metric
 %PSF...3D point spread function, member of "psf" class
 %lens...member of "objective" class
@@ -22,18 +22,27 @@ if nVarargs==1
     metrictype=varargin{1};
     method='';
     pupil_UAF=1;
+    norm_method = 'uaf';   
 elseif nVarargs==2
     metrictype=varargin{1};
     method=varargin{2}; 
     pupil_UAF=1; 
+    norm_method = 'uaf';   
 elseif nVarargs==3
     metrictype=varargin{1};
     method=varargin{2};
     pupil_UAF=varargin{3}; %for Donald imaging
+    norm_method = 'uaf';   
+elseif nVarargs==4
+    metrictype=varargin{1};
+    method=varargin{2};
+    pupil_UAF=varargin{3}; %for Donald imaging
+    norm_method = varargin{4}; %method of normalization (const. intensity in uaf+saf or only uaf)
 else
     metrictype=1; 
     method='';
     pupil_UAF=1; 
+    norm_method = 'uaf';  
 end
 
 %------------------------------
@@ -46,7 +55,7 @@ PSF2.Nx=PSF.Nx/PSF.os;
 PSF2.Ny=PSF.Ny/PSF.os; 
 PSF2.data=zeros(PSF2.Nx,PSF2.Nx,PSF2.Nz);
 
-if strcmp(method,'biplane') || strcmp(method,'donald')
+if strcmp(method,'biplane') || strcmp(method,'donald') || strcmp(method,'dSALM')
     PSF3=PSF2; 
 end
 
@@ -57,7 +66,15 @@ Ey_Px=E_tensor(:,:,:,4);
 Ey_Py=E_tensor(:,:,:,5); 
 Ey_Pz=E_tensor(:,:,:,6); 
 
-E_tot=squeeze(abs(pupilmask).^2.*sum(sum(sum(abs(E_tensor).^2,1),2),4));
+%Method of normalization 
+if strcmp(norm_method,'tot')
+    %normalization for a constant number of photons in ENTIRE pupil (UAF + SAF)
+    E_tot=squeeze(abs(pupilmask).^2.*sum(sum(sum(abs(E_tensor).^2,1),2),4));
+elseif strcmp(norm_method,'uaf')
+    %normalization for a constant number of photons in UAF pupil (more
+    %realistic)
+    E_tot=squeeze(abs(pupilmask).^2.*sum(sum(sum(abs(E_tensor.*pupil_UAF).^2,1),2),4));
+end
 
 Nk=size(Ex_Px,1);
 uk=4*pi/PSF.lambda*lens.NA/Nk; %unit in pupil space (k-space)
@@ -77,23 +94,23 @@ options=optimset('Display','iter','Tolfun',1e-7);
     F_kernel=fft2(ifftshift(kernel)); 
 
 
-if strcmp(method,'biplane') || strcmp(method,'donald')
+if strcmp(method,'biplane') || strcmp(method,'donald') || strcmp(method,'dSALM')
     
     if length(a_ini)==3 %if the split-ratio (parameter 3) is also variable
         LB=[-10, -10, 0]; %it is important to bound the split ratio!
         UB=[10, 10, 1]; 
-        a_opt=fminsearchbnd(@fun_optimize_biplane,a_ini,LB,UB,options);
+        [a_opt, fval]=fminsearchbnd(@fun_optimize_biplane,a_ini,LB,UB,options);
     else
-        a_opt=fminsearch(@fun_optimize_biplane,a_ini,options);
+        [a_opt, fval]=fminsearch(@fun_optimize_biplane,a_ini,options);
     end
     
 else %single-channel imaging
-    a_opt=fminsearch(@fun_optimize,a_ini,options);
+    [a_opt, fval]=fminsearch(@fun_optimize,a_ini,options);
 end
 
 
-
 %% ------------------------------SINGLE CHANNEL IMAGING------------------------------
+
 function metric=fun_optimize(a)
     
     a2=ones(1,1,length(a)); a2(1,1,:)=a; 
@@ -115,20 +132,22 @@ function metric=fun_optimize(a)
     
     [CRBx,CRBy,CRBz]=PSF2.CRLB(sig,bg,cam); 
     if metrictype==1
-        metric=mean((sqrt((CRBx(2:end).*CRBy(2:end).*CRBz(2:end))).^(1/3)));  %"localization volume"
+        metric=mean((sqrt((CRBx.*CRBy.*CRBz)).^(1/3)));  %"localization volume"
     elseif metrictype==2
-        metric=mean((sqrt(abs(CRBz(2:end))))); 
+        metric=mean((sqrt(abs(CRBz)))); 
     end
 
     %show pupil phase
-    subplot(2,1,1);
+    figure(1);
+    %subplot(2,1,1);
     imagesc(phase); axis equal; axis tight; colorbar; 
     set(gca,'xtick',[]);
     set(gca,'ytick',[]);
     title('pupil phase'); 
     
     %show CRLB
-    subplot(2,1,2); 
+    figure(2); 
+    %subplot(2,1,2); 
     plot(z,sqrt(CRBx),'b');
     hold on; 
     plot(z,sqrt(CRBy),'b');
@@ -144,14 +163,17 @@ function metric=fun_optimize(a)
 end
 
 %% ----------------------------------BIPLANE-------------------------------
+
 function metric=fun_optimize_biplane(a)
     
     %the two input parameters a(1) and a(2) contain defocus values for the
     %two imaging channels, the third (optional) parameter, the split ratio
     %between the channels
     
-    if strcmp(method,'biplane');
-    
+    if strcmp(method,'biplane')
+        eta = 0.5; 
+        bg1 = bg; 
+        bg2 = bg; 
         %defining differences between the two channels: 
         if length(a)>=4 %if other modes have been chosen, too
             phase1=a(1)*Z(:,:,1)+a(4)*Z(:,:,2);
@@ -166,10 +188,23 @@ function metric=fun_optimize_biplane(a)
         end
         
     elseif strcmp(method,'donald')
+        eta = 0.5; 
+        bg1 = bg; 
+        bg2 = bg; 
         phase1=a(1)*Z(:,:,1);
-        phase2=phase1; 
+        phase2=phase1; %a(2)*Z(:,:,2); 
         mask1=pupilmask.*exp(1i*phase1); 
         mask2=pupilmask.*pupil_UAF.*exp(1i*phase2);
+        
+    elseif strcmp(method,'dSALM')
+        eta = 1;
+        bg1 = bg; 
+        bg2 = bg/10; %SAF channel is supposed to contain only a fraction of the background
+        phase1=a(1)*Z(:,:,1);
+        phase2=a(1)*Z(:,:,1); 
+        mask1=pupilmask.*pupil_UAF.*exp(1i*phase1); %UAF channel
+        mask2=pupilmask.*(1-pupil_UAF).*exp(1i*phase2); %SAF channel
+         
     end
             
     if length(a)>=3  
@@ -202,40 +237,35 @@ function metric=fun_optimize_biplane(a)
         %PSF3.data(:,:,m)=PSF3.data(:,:,m)/squeeze(sum(sum((I_xx+I_yx+I_xy+I_yy+I_xz+I_yz),1),2));
     end
     
-    %adding Fisher information of both channels
-    [~,~,~,~,~,FI1]=PSF2.CRLB(sig,bg,cam,split_ratio); %here it is important to set the detection efficiency of the channel!
-    [~,~,~,~,~,FI2]=PSF3.CRLB(sig,bg,cam,(1-split_ratio)); 
-    FI=FI1+FI2;
+    %---method B---: 
+%     PSFdual = PSF2; 
+%     PSFdual.data = [PSF2.data, PSF3.data]; 
+%     PSFdual.Ny = 2*PSF2.Ny; 
+%     [CRBx,CRBy,CRBz,~,~,~]=PSFdual.CRLB(sig,bg,cam,eta); 
 
-    for m=1:size(FI,3)
-        %CRBs calculated from the sum of Fisher infos -> optimal
-        tmp=inv(FI(:,:,m));
-        CRBx(m)=tmp(1,1);
-        CRBy(m)=tmp(2,2);
-        CRBz(m)=tmp(3,3);
-        CRBsig(m)=tmp(4,4);
-        CRBbg(m)=tmp(5,5);
-    end
+    %---method C---: 
+    [CRBx, CRBy, CRBz, ~, ~] = fun_CRLB({PSF2, PSF3},eta*sig,eta*[bg1 bg2],cam.readnoise); 
 
     if metrictype==1
-        metric=mean((sqrt((CRBx(2:end).*CRBy(2:end).*CRBz(2:end))).^(1/3)));  %"localization volume"
+        metric=mean((sqrt((CRBx.*CRBy.*CRBz)).^(1/3)));  %"localization volume"
     elseif metrictype==2
-        metric=mean((sqrt(abs(CRBz(2:end))))); 
+        metric=mean((sqrt(abs(CRBz)))); 
     end
     
-    subplot(3,1,1);
+    figure(1);
+    subplot(2,1,1);
     imagesc(phase1); axis equal; axis tight; colorbar; 
     title('phase pupil 1'); 
     set(gca,'xtick',[]);
     set(gca,'ytick',[]);
 
-    subplot(3,1,2);
+    subplot(2,1,2);
     imagesc(phase2); axis equal; axis tight; colorbar; 
     title('phase pupil 2');
     set(gca,'xtick',[]);
     set(gca,'ytick',[]);
 
-    subplot(3,1,3); 
+    figure(2); 
     plot(z,sqrt(CRBx),'b');
     hold on; 
     plot(z,sqrt(CRBy),'b');
@@ -243,7 +273,11 @@ function metric=fun_optimize_biplane(a)
     hold off; 
     ylabel('nm');
     xlabel('z');
-    title([method ', ' num2str(a,3) '/ sig,bg=' num2str(sig) ',' num2str(bg)]);
+    if strcmp(method,'dSALM')
+        title([method ', ' num2str(a,3) ' / sig,bg=' num2str(sig) ',' num2str(bg1) '/' num2str(bg2)]);
+    else
+        title([method ', ' num2str(a,3) ' / sig,bg=' num2str(sig) ',' num2str(bg)]);
+    end
     ylim([0 inf]);
     pause(0);
 end

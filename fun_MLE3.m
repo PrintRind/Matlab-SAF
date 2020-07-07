@@ -67,13 +67,14 @@ for m=1:no_images
         LB=[-nx/3 -ny/3 1 0.25*N0 0]; %lower bounds
         UB=[+nx/3 +ny/3 PSF.Nz 4*N0 4*BG0]; %upper bounds
 
-        tmp=fminsearchbnd(@fun_LLH,init_est,LB,UB,options); 
+        [tmp,LLH]=fminsearchbnd(@fun_LLH,init_est,LB,UB,options); 
         x_est=tmp(1)*PSF.ux;
         y_est=tmp(2)*PSF.ux;
         z_est=(tmp(3)-1)*PSF.uz;
         N_est=tmp(4)/cam.QE;
         BG_est=tmp(5)/cam.QE;
-        resnorm_MLE=sum((abs(M(:)-I(:)).^2))/(sum(I(:)))^2; 
+        resnorm_MLE=sum((abs(M(:)-I(:)).^2))/(sum(I(:)))^2;
+        %LLR=2*(LLH-(sum(sum(I-I.*log(I))))); %log-likelihood ratio (see Huang et al. suppl. materials)
         est(m,:)=[x_est.' y_est.' z_est.' N_est.' BG_est.' resnorm_MLE.'];
 
         %display every xth image
@@ -99,7 +100,7 @@ for m=1:no_images
         LB=[-nx/3 -ny/3 1 0.25*N0 0 -nx/3 -ny/3]; %lower bounds
         UB=[+nx/3 +ny/3 PSF(1).Nz 4*N0 4*BG0 nx/3 ny/3]; %upper bounds
     
-        tmp=fminsearchbnd(@fun_LLH_biplane,init_est,LB,UB,options); 
+        [tmp,LLH]=fminsearchbnd(@fun_LLH_biplane,init_est,LB,UB,options); 
         x_est=tmp(1)*PSF(1).ux;
         y_est=tmp(2)*PSF(1).ux;
         z_est=(tmp(3)-1)*PSF(1).uz;
@@ -107,8 +108,9 @@ for m=1:no_images
         BG_est=tmp(5)/cam.QE;
         x2_est=tmp(6)*PSF(1).ux;
         y2_est=tmp(7)*PSF(1).ux;
-        
         resnorm_MLE=sum(abs(Ma(:)-I_a(:)).^2+abs(Mb(:)-I_b(:)).^2)/(sum(I_a(:)+I_b(:)))^2; 
+        %LLR=2*(LLH-sum(sum(I_a-I_a.*log(I_a)+I_b-I_b.*log(I_b)))); %log-likelihood ratio (see Huang et al. suppl. materials)
+
         est(m,:)=[x_est.' y_est.' z_est.' N_est.' BG_est.' resnorm_MLE.' x2_est.' y2_est.'];
 
         %display every xth image
@@ -125,7 +127,6 @@ end
 
 %----------------------------------------------------------------------------------------
 %----------------------------------------------------------------------------------------
-
     
 %defining log-likelihood function; works in conjunction with
 %gradient-free minimum-search such as fminsearch
