@@ -1,24 +1,29 @@
-function est=fun_MLE4(PSF,data,z_ini,CAM)
+function est=fun_MLE4(PSF,locdata,varmap,gainmap,z_ini)
 %estimation based on 3D PSF; PSF should be finer sampled than the
 %effective camera pixel size in focal plane
 %inputs:
 %--------------
 %PSF....member of the "psf" class; If PSF is an array containing two
 %PSF-class members --> biplane imaging mode
-%data....structure array containing the following: 
-    %data.images.... stack of single molecule imgages (e.g. size 13x13x10000)
-    %data.ULC....array containing the upper left corner coordinates of the
-    %molecule images with respect to the sCMOS sensor
+%locdata....structure array containing the following: 
+    %locdata.images.... stack of single molecule imgages (e.g. size 13x13x10000)
+    %locdata.coords....array containing the coarse x-y- positions of
+    %molecules (x = row index, y = col. index)
+%varmap...image of variances
+%gainmap...image of gain values in units of (electrons / ADU)
 %If PSF is a vector containing two PSFs --> biplane imaging mode
     %then, I_stack must be a structure array with two entries 
 %z_ini_ind....initial estimate for molecule z position in meter
-%cam...member of the camera class 
 %if data contains only a stack of images (and no pixel-dependent
 %noise/gain/baseline info), the properties are assumed to be uniform over
 %the entire camera chip
+%
+%outputs: 
+%---------------
+%est=[x y z N BG resnorm]; x,y,z in nm
 
 z_ini_ind=round(z_ini/PSF(1).uz+1);
-fw=(PSF(1).Nx/PSF(1).os-size(I_stack,1))/2; %frame width
+fw=(PSF(1).Nx/PSF(1).os-size(locdata.images,1))/2; %frame width
 
 %creating large grid for oversampled PSF
 x=((PSF(1).os+1)/2)+fw*PSF(1).os:PSF(1).os:PSF(1).Nx-((PSF(1).os-1)/2)-fw*PSF(1).os;
@@ -39,18 +44,21 @@ if length(PSF)==2 %biplane imaging
 else %single-channel imaging
     
    mode='single';
-   I_stack=data.images; %stack of single molecule images
-   [nx,ny,no_images]=size(I_stack);
+   %I_stack=locdata.images; %stack of single molecule images
+   [nx,ny,no_images]=size(locdata.images);
    Fa=griddedInterpolant(PSF(1).data*PSF(1).os^2,'spline','nearest'); %multiplication with PSF.os^2 to preserve normalization 
+
+   w = -floor(nx/2):floor(nx/2); %coord. range along which the single mol. images are cropped
 
    %retrieving pixel-characteristics for every molecule image (readout noise, gain, baseline)
    var=zeros(nx,ny,no_images);
    gain=var; 
-   offset=gain; 
+
    for m=1:no_images
-       var(:,:,m)=cam.varmap(data.ULC(m,1)+(0:nx-1),data.ULC(m,2)+(0:ny-1));  %variance in ADUs
-       gain(:,:,m)=cam.gainmap(data.ULC(m,1)+(0:nx-1),data.ULC(m,2)+(0:ny-1));  %gain must be in units of ADUs/electron
-       offset(:,:,m)=cam.offsetmap(data.ULC(m,1)+(0:nx-1),data.ULC(m,2)+(0:ny-1)); %offset in ADUs
+       row = locdata.coords(m,3)+w; 
+       col =  locdata.coords(m,4)+w; 
+       var(:,:,m)=varmap(row, col);  %variance in ADUs
+       gain(:,:,m)=gainmap(row, col);  %gain must be in units of ADUs/electron
    end
    
 end
@@ -72,8 +80,9 @@ for m=1:no_images
     if strcmp(mode,'single')
     
         %sCMOS algorithm: see Huang et al. Nat.Meth. 2013
-        I=(I_stack(:,:,m)-offset(:,:,m))/gain(:,:,m)+var(:,:,m)./gain(:,:,m).^2; %grab image from stack and modify according to paper of Huang et al.
-        M_modif=var(:,:,m)./gain(:,:,m).^2; %model-modification for sCMOS detection 
+        I=double(locdata.images(:,:,m))+var(:,:,m).*gain(:,:,m).^2; %grab image from stack and modify according to paper of Huang et al.
+        %I=(locdata.images(:,:,m)-offset(:,:,m))*gain(:,:,m)+var(:,:,m).*gain(:,:,m).^2; %grab image from stack and modify according to paper of Huang et al.
+        M_modif=var(:,:,m).*gain(:,:,m).^2; %model-modification for sCMOS detection 
         
         %define initial estimates and bounds
         BG0=min(I(:));
@@ -82,12 +91,13 @@ for m=1:no_images
         LB=[-nx/3 -ny/3 1 0.25*N0 0]; %lower bounds
         UB=[+nx/3 +ny/3 PSF.Nz 4*N0 4*BG0]; %upper bounds
 
-        tmp=fminsearchbnd(@fun_LLH,init_est,LB,UB,options); 
+        [tmp, LLH]=fminsearchbnd(@fun_LLH,init_est,LB,UB,options); 
         x_est=tmp(1)*PSF.ux;
         y_est=tmp(2)*PSF.ux;
         z_est=(tmp(3)-1)*PSF.uz;
         N_est=tmp(4);
         BG_est=tmp(5);
+        LLR=2*(LLH-(sum(sum(I-I.*log(I))))); %log-likelihood ratio (see Huang et al. suppl. materials)
         resnorm_MLE=sum((abs(M(:)-I(:)).^2))/(sum(I(:)))^2; 
         est(m,:)=[x_est.' y_est.' z_est.' N_est.' BG_est.' resnorm_MLE.'];
 
